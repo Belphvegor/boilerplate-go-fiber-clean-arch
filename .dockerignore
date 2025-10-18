@@ -1,0 +1,16 @@
+# Build context exclusions for Docker image builds
+.git
+.gitignore
+.specify/
+specs/
+checklists/
+README.md
+docs/
+coverage/
+/tmp/
+bin/
+build/
+vendor/
+*.log
+.env
+.env.*

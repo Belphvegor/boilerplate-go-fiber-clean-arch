@@ -1,0 +1,25 @@
+.specify
+.codex
+specs
+
+# Build artifacts
+/bin/
+/build/
+*.exe
+*.test
+*.out
+
+# Dependencies & tools
+/vendor/
+coverage/
+
+# Environment & secrets
+.env
+.env.*
+
+# IDE/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
