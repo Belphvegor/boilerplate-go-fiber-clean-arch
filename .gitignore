@@ -1,5 +1,8 @@
 .specify
 .codex
+.claude/
+agent-os/
+GEMINI.md
 specs
 
 # Build artifacts
