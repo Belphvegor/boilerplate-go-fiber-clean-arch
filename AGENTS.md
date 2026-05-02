@@ -1,24 +1,24 @@
-# go-fiber-clean-arch Development Guidelines
+# Repository Guidelines
 
-Auto-generated from all feature plans. Last updated: 2025-10-18
+## Project Structure & Module Organization
+The Go application lives under `cmd/api` (entrypoint) and `internal/` (bootstrap wiring and bounded contexts such as `internal/user`). Shared helpers stay in `pkg/` (`logger`, `middleware`, `response`). Configuration loaders are stored in `config/`, while database migrations and seed data sit in `db/`. Documentation and architectural references are under `docs/`. Integration and end-to-end test suites belong in `test/`, and build tooling resides in `scripts/`.
 
-## Active Technologies
-- Go 1.22 + Fiber v2, Zerolog, Viper, godotenv, SQLX, go-playground/validator, testify, sqlmock, MongoDB Go Driver (001-specify-scripts-bash)
+## Build, Test, and Development Commands
+- `make -C scripts build` - compile the service across modules.
+- `make -C scripts fmt` - format Go sources with `gofmt`.
+- `make -C scripts lint` - run `golangci-lint` (falls back to `go vet`).
+- `go run ./cmd/api` - launch the Fiber server locally.
+- `go test ./...` - execute unit and integration tests.
+- `docker compose up -d database` - start backing services for local runs.
 
-## Project Structure
-```
-src/
-tests/
-```
+## Coding Style & Naming Conventions
+Target Go 1.22 with idiomatic style. Keep files formatted via `make -C scripts fmt` before every commit. Prefer package-level names that reflect architecture layers (e.g., `userRepository`, `CreateUserUseCase`). Interfaces normally live near their consumers inside `internal/<domain>`, and shared types should only be exported from `pkg/`. Structured logging flows through Zerolog helpers; avoid ad-hoc `fmt.Println`.
 
-## Commands
-# Add commands for Go 1.22
+## Testing Guidelines
+Author tests first to satisfy the "Tests Before Trust" principle. Store unit tests alongside their packages and use `sqlmock` or containerized databases for persistence coverage. Name integration tests after the user flow they verify (e.g., `TestUserCreateHandler_Success`). Run `go test ./...` before pushing and attach benchmark or load scripts when you touch hot paths.
 
-## Code Style
-Go 1.22: Follow standard conventions
+## Commit & Pull Request Guidelines
+Write imperative, focused commit messages that describe the outcome (e.g., `docs: update domain checklist for audit logging`). Each pull request must confirm formatting, lint, and test passes, outline architecture impacts, link relevant specs in `specs/<feature-id>/`, and include documentation or schema changes in the same branch.
 
-## Recent Changes
-- 001-specify-scripts-bash: Added Go 1.22 + Fiber v2, Zerolog, Viper, godotenv, SQLX, go-playground/validator, testify, sqlmock, MongoDB Go Driver
-
-<!-- MANUAL ADDITIONS START -->
-<!-- MANUAL ADDITIONS END -->
+## Security & Configuration Tips
+Clone `.env.example` to `.env` for local secrets and never commit actual credentials. Document any new environment key in `docs/configuration.md` and wire defaults through `config/`. Use `pkg/middleware` for standardized observability and ensure Zerolog fields include correlation IDs when handling requests.

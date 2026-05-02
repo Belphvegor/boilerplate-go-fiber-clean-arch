@@ -30,9 +30,10 @@ func NewHandler(service *usecase.Service, validator *validator.Adapter, logger z
 }
 
 // Register adds user routes to the router.
-func (h *Handler) Register(router fiber.Router) {
+func (h *Handler) Register(router fiber.Router, protected ...fiber.Handler) {
 	router.Post("/users", h.createUser)
-	router.Get("/users/:id", h.getUser)
+	getHandlers := append(protected, h.getUser)
+	router.Get("/users/:id", getHandlers...)
 }
 
 func (h *Handler) createUser(ctx *fiber.Ctx) error {

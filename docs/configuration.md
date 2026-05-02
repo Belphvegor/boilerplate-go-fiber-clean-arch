@@ -19,13 +19,32 @@ The starter reads configuration exclusively from environment variables (loadable
 | `APP_MONGO_DATABASE` | MongoDB database name. | `app` | |
 | `APP_JWT_SECRET` | HMAC secret for JWT middleware. | _none_ | Must be set for any environment. |
 | `APP_JWT_ISSUER` | JWT issuer claim. | `clean-arch-starter` | |
+| `APP_JWT_AUDIENCE` | JWT audience claim for this API. | `clean-arch-starter-api` | Protected routes reject tokens for other audiences. |
 | `APP_JWT_ACCESS_TTL` | Access token lifetime. | `15m` | Parsed as Go duration. |
+| `APP_OIDC_ENABLED` | Enable OAuth2/OIDC login endpoints. | `false` | When `true`, OIDC client settings are required. |
+| `APP_OIDC_ISSUER_URL` | External OIDC issuer URL. | _none_ | Used for discovery and ID token issuer validation. |
+| `APP_OIDC_CLIENT_ID` | OIDC client ID. | _none_ | Must match provider registration. |
+| `APP_OIDC_CLIENT_SECRET` | OIDC client secret. | _none_ | Keep secret; never commit real values. |
+| `APP_OIDC_REDIRECT_URL` | Callback URL registered at the provider. | _none_ | Example: `http://localhost:8080/api/v1/auth/callback`. |
+| `APP_OIDC_SCOPES` | OIDC scopes requested at login. | `openid profile email` | Must include `openid`; `email` is needed for auto-provisioning. |
+| `APP_OIDC_LOGIN_STATE_TTL` | Lifetime for temporary state/nonce/PKCE cookies. | `5m` | Parsed as Go duration. |
 | `APP_LOGGING_LEVEL` | Zerolog level (`trace`, `debug`, `info`, `warn`, `error`). | `info` | |
 | `APP_LOGGING_PRETTY` | Enable human-readable console logs. | `true` | Set to `false` for JSON logs. |
 | `APP_REQUEST_LOGGER_ENABLED` | Enable request logging middleware. | `true` | |
 | `APP_RECOVERY_ENABLED` | Enable panic recovery middleware. | `true` | |
 | `APP_CORS_ENABLED` | Enable permissive CORS headers. | `true` | Configure or replace for stricter policies. |
-| `APP_JWT_MIDDLEWARE_ENABLED` | Enable JWT middleware for protected routes. | `true` | Set to `false` for public endpoints or local development. |
+| `APP_JWT_MIDDLEWARE_ENABLED` | Enable route-level JWT protection. | `true` | Set to `false` for public endpoints or local development. |
+
+## OAuth2 / OpenID Connect
+
+The API acts as an OIDC client. `GET /api/v1/auth/login` starts Authorization Code + PKCE login, and `GET /api/v1/auth/callback` validates the ID token, links the stable provider/subject identity, and returns a short-lived local Bearer token.
+
+For production:
+
+- Register the exact `APP_OIDC_REDIRECT_URL` with the provider.
+- Use HTTPS for the redirect URL and a strong `APP_JWT_SECRET` of at least 32 characters.
+- Keep `APP_JWT_MIDDLEWARE_ENABLED=true` so protected routes require the local Bearer token.
+- Keep the default scopes unless the provider requires additional values; auto-provisioning needs a verified email claim.
 
 ## Switching Databases
 
@@ -63,6 +82,8 @@ The starter reads configuration exclusively from environment variables (loadable
 The configuration loader validates required settings on startup:
 
 - Missing `APP_JWT_SECRET` returns an actionable error before Fiber starts.
+- Production rejects `APP_JWT_SECRET=change-me` and secrets shorter than 32 characters.
+- Enabling OIDC without issuer, client ID, client secret, redirect URL, or a positive state TTL stops boot.
 - SQL drivers require `APP_DATABASE_DSN`; MongoDB requires `APP_MONGO_URI` and `APP_MONGO_DATABASE`.
 - Duration values are parsed using `time.ParseDuration`; invalid formats stop boot.
 

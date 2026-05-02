@@ -14,6 +14,7 @@ import (
 	// "github.com/valyala/fasthttp"
 
 	"github.com/casper/go-fiber-clean-arch/config"
+	authhttp "github.com/casper/go-fiber-clean-arch/internal/auth/delivery/http"
 	"github.com/casper/go-fiber-clean-arch/internal/bootstrap"
 	userhttp "github.com/casper/go-fiber-clean-arch/internal/user/delivery/http"
 	"github.com/casper/go-fiber-clean-arch/pkg/middleware"
@@ -48,7 +49,7 @@ func main() {
 
 	middleware.Register(app, cfg, container.Logger)
 
-	if err := container.RegisterRoutes(app, userhttp.Register); err != nil {
+	if err := container.RegisterRoutes(app, authhttp.Register, userhttp.Register); err != nil {
 		container.Logger.Fatal().Err(err).Msg("register routes")
 	}
 
@@ -60,7 +61,7 @@ func main() {
 	})
 
 	if !cfg.Middleware.JWT {
-		container.Logger.Warn().Msg("JWT middleware disabled; endpoints are public")
+		container.Logger.Warn().Msg("JWT route protection disabled; protected endpoints are public")
 	}
 
 	go func() {

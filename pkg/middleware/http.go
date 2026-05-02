@@ -1,14 +1,16 @@
 package middleware
 
 import (
+	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	fiberRecover "github.com/gofiber/fiber/v2/middleware/recover"
-	jwtware "github.com/gofiber/jwt/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 
 	"github.com/casper/go-fiber-clean-arch/config"
@@ -36,14 +38,50 @@ func Register(app *fiber.App, cfg *config.AppConfig, log zerolog.Logger) {
 	if cfg.Middleware.CORS {
 		app.Use(cors.New())
 	}
+}
 
-	if cfg.Middleware.JWT {
-		app.Use(jwtware.New(jwtware.Config{
-			SigningKey:   []byte(cfg.JWT.Secret),
-			ContextKey:   "user",
-			ErrorHandler: jwtErrorHandler,
-		}))
+// JWTProtected validates local API bearer tokens for protected routes.
+func JWTProtected(cfg config.JWTConfig) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		tokenString, err := bearerToken(ctx.Get(fiber.HeaderAuthorization))
+		if err != nil {
+			return jwtErrorHandler(ctx, err)
+		}
+
+		claims := jwt.MapClaims{}
+		token, err := jwt.ParseWithClaims(
+			tokenString,
+			claims,
+			func(token *jwt.Token) (interface{}, error) {
+				return []byte(cfg.Secret), nil
+			},
+			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+			jwt.WithIssuer(cfg.Issuer),
+			jwt.WithAudience(cfg.Audience),
+			jwt.WithExpirationRequired(),
+		)
+		if err != nil || token == nil || !token.Valid {
+			if err == nil {
+				err = errors.New("invalid token")
+			}
+			return jwtErrorHandler(ctx, err)
+		}
+
+		ctx.Locals("auth.claims", claims)
+		ctx.Locals("auth.user_id", claims["sub"])
+		return ctx.Next()
 	}
+}
+
+func bearerToken(header string) (string, error) {
+	if header == "" {
+		return "", errors.New("missing authorization header")
+	}
+	parts := strings.Fields(header)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return "", errors.New("invalid authorization header")
+	}
+	return parts[1], nil
 }
 
 func jwtErrorHandler(ctx *fiber.Ctx, err error) error {

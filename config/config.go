@@ -32,6 +32,7 @@ type AppConfig struct {
 	Database    DatabaseConfig
 	Mongo       MongoConfig
 	JWT         JWTConfig
+	OIDC        OIDCConfig
 	Logging     LoggingConfig
 	Middleware  MiddlewareConfig
 }
@@ -45,11 +46,11 @@ type HTTPConfig struct {
 
 // DatabaseConfig captures relational database connectivity details.
 type DatabaseConfig struct {
-	Driver        string
-	DSN           string
-	MaxOpenConns  int
-	MaxIdleConns  int
-	ConnMaxLife   time.Duration
+	Driver         string
+	DSN            string
+	MaxOpenConns   int
+	MaxIdleConns   int
+	ConnMaxLife    time.Duration
 	MetricsEnabled bool
 }
 
@@ -63,7 +64,19 @@ type MongoConfig struct {
 type JWTConfig struct {
 	Secret    string
 	Issuer    string
+	Audience  string
 	AccessTTL time.Duration
+}
+
+// OIDCConfig defines external OpenID Connect client configuration.
+type OIDCConfig struct {
+	Enabled       bool
+	IssuerURL     string
+	ClientID      string
+	ClientSecret  string
+	RedirectURL   string
+	Scopes        []string
+	LoginStateTTL time.Duration
 }
 
 // LoggingConfig declares logging behaviour.
@@ -122,6 +135,11 @@ func Load(envFiles ...string) (*AppConfig, error) {
 		return nil, err
 	}
 
+	oidcCfg, err := parseOIDCConfig(v)
+	if err != nil {
+		return nil, err
+	}
+
 	loggingCfg := LoggingConfig{
 		Level:  strings.ToLower(strings.TrimSpace(v.GetString("LOGGING.LEVEL"))),
 		Pretty: v.GetBool("LOGGING.PRETTY"),
@@ -141,6 +159,7 @@ func Load(envFiles ...string) (*AppConfig, error) {
 		Database:    dbCfg,
 		Mongo:       mongoCfg,
 		JWT:         jwtCfg,
+		OIDC:        oidcCfg,
 		Logging:     loggingCfg,
 		Middleware:  mwCfg,
 	}
@@ -178,8 +197,37 @@ func (c *AppConfig) Validate() error {
 		return errors.New("config: APP_JWT_SECRET is required")
 	}
 
+	if c.Environment == "production" && (c.JWT.Secret == "change-me" || len(c.JWT.Secret) < 32) {
+		return errors.New("config: APP_JWT_SECRET must be a strong secret in production")
+	}
+
+	if c.JWT.Audience == "" {
+		return errors.New("config: APP_JWT_AUDIENCE is required")
+	}
+
 	if c.JWT.AccessTTL <= 0 {
 		return errors.New("config: APP_JWT_ACCESS_TTL must be positive duration")
+	}
+
+	if c.OIDC.Enabled {
+		if c.OIDC.IssuerURL == "" {
+			return errors.New("config: APP_OIDC_ISSUER_URL is required when OIDC is enabled")
+		}
+		if c.OIDC.ClientID == "" {
+			return errors.New("config: APP_OIDC_CLIENT_ID is required when OIDC is enabled")
+		}
+		if c.OIDC.ClientSecret == "" {
+			return errors.New("config: APP_OIDC_CLIENT_SECRET is required when OIDC is enabled")
+		}
+		if c.OIDC.RedirectURL == "" {
+			return errors.New("config: APP_OIDC_REDIRECT_URL is required when OIDC is enabled")
+		}
+		if c.OIDC.LoginStateTTL <= 0 {
+			return errors.New("config: APP_OIDC_LOGIN_STATE_TTL must be positive duration")
+		}
+		if !contains(c.OIDC.Scopes, "openid") {
+			return errors.New("config: APP_OIDC_SCOPES must include openid")
+		}
 	}
 
 	if c.HTTP.Port == "" {
@@ -212,7 +260,16 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("JWT.SECRET", "")
 	v.SetDefault("JWT.ISSUER", "clean-arch-starter")
+	v.SetDefault("JWT.AUDIENCE", "clean-arch-starter-api")
 	v.SetDefault("JWT.ACCESS_TTL", "15m")
+
+	v.SetDefault("OIDC.ENABLED", false)
+	v.SetDefault("OIDC.ISSUER_URL", "")
+	v.SetDefault("OIDC.CLIENT_ID", "")
+	v.SetDefault("OIDC.CLIENT_SECRET", "")
+	v.SetDefault("OIDC.REDIRECT_URL", "")
+	v.SetDefault("OIDC.SCOPES", "openid profile email")
+	v.SetDefault("OIDC.LOGIN_STATE_TTL", "5m")
 
 	v.SetDefault("LOGGING.LEVEL", "info")
 	v.SetDefault("LOGGING.PRETTY", true)
@@ -259,11 +316,11 @@ func parseDatabaseConfig(v *viper.Viper) (DatabaseConfig, error) {
 	metricsEnabled := parseBool(v.GetString("DATABASE.METRICS_ENABLED"))
 
 	return DatabaseConfig{
-		Driver:        strings.ToLower(strings.TrimSpace(v.GetString("DATABASE.DRIVER"))),
-		DSN:           strings.TrimSpace(v.GetString("DATABASE.DSN")),
-		MaxOpenConns:  maxOpen,
-		MaxIdleConns:  maxIdle,
-		ConnMaxLife:   connMaxLife,
+		Driver:         strings.ToLower(strings.TrimSpace(v.GetString("DATABASE.DRIVER"))),
+		DSN:            strings.TrimSpace(v.GetString("DATABASE.DSN")),
+		MaxOpenConns:   maxOpen,
+		MaxIdleConns:   maxIdle,
+		ConnMaxLife:    connMaxLife,
 		MetricsEnabled: metricsEnabled,
 	}, nil
 }
@@ -277,8 +334,57 @@ func parseJWTConfig(v *viper.Viper) (JWTConfig, error) {
 	return JWTConfig{
 		Secret:    strings.TrimSpace(v.GetString("JWT.SECRET")),
 		Issuer:    strings.TrimSpace(v.GetString("JWT.ISSUER")),
+		Audience:  strings.TrimSpace(v.GetString("JWT.AUDIENCE")),
 		AccessTTL: ttl,
 	}, nil
+}
+
+func parseOIDCConfig(v *viper.Viper) (OIDCConfig, error) {
+	ttl, err := time.ParseDuration(v.GetString("OIDC.LOGIN_STATE_TTL"))
+	if err != nil {
+		return OIDCConfig{}, fmt.Errorf("config: invalid APP_OIDC_LOGIN_STATE_TTL: %w", err)
+	}
+
+	return OIDCConfig{
+		Enabled:       v.GetBool("OIDC.ENABLED"),
+		IssuerURL:     strings.TrimRight(strings.TrimSpace(v.GetString("OIDC.ISSUER_URL")), "/"),
+		ClientID:      strings.TrimSpace(v.GetString("OIDC.CLIENT_ID")),
+		ClientSecret:  strings.TrimSpace(v.GetString("OIDC.CLIENT_SECRET")),
+		RedirectURL:   strings.TrimSpace(v.GetString("OIDC.REDIRECT_URL")),
+		Scopes:        parseScopes(v.GetString("OIDC.SCOPES")),
+		LoginStateTTL: ttl,
+	}, nil
+}
+
+func parseScopes(value string) []string {
+	seen := make(map[string]struct{})
+	scopes := make([]string, 0)
+	for _, scope := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t'
+	}) {
+		scope = strings.TrimSpace(scope)
+		if scope == "" {
+			continue
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		scopes = append(scopes, scope)
+	}
+	if !contains(scopes, "openid") {
+		scopes = append([]string{"openid"}, scopes...)
+	}
+	return scopes
+}
+
+func contains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func parseBool(val string) bool {

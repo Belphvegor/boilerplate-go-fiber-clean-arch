@@ -10,6 +10,7 @@ import (
 	"github.com/casper/go-fiber-clean-arch/internal/user/infrastructure/persistence"
 	"github.com/casper/go-fiber-clean-arch/internal/user/repository"
 	"github.com/casper/go-fiber-clean-arch/internal/user/usecase"
+	"github.com/casper/go-fiber-clean-arch/pkg/middleware"
 )
 
 // Register wires user routes into the application.
@@ -23,7 +24,11 @@ func Register(app *fiber.App, container *bootstrap.Container) error {
 	handler := NewHandler(svc, container.Validator, childLogger(container.Logger))
 
 	api := app.Group("/api/v1")
-	handler.Register(api)
+	if container.Config.Middleware.JWT {
+		handler.Register(api, middleware.JWTProtected(container.Config.JWT))
+	} else {
+		handler.Register(api)
+	}
 
 	return nil
 }
