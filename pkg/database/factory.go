@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql" // registers the "mysql" database/sql driver
 	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq" // registers the "postgres" database/sql driver
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"

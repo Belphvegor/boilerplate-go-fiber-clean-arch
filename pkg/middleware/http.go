@@ -36,7 +36,14 @@ func Register(app *fiber.App, cfg *config.AppConfig, log zerolog.Logger) {
 	}
 
 	if cfg.Middleware.CORS {
-		app.Use(cors.New())
+		origins := cfg.Middleware.CORSOrigins
+		if origins == "" {
+			origins = "*"
+		}
+		if origins == "*" && cfg.Environment == "production" {
+			log.Warn().Msg("CORS allows every origin; set APP_CORS_ORIGINS to an allowlist")
+		}
+		app.Use(cors.New(cors.Config{AllowOrigins: origins}))
 	}
 }
 

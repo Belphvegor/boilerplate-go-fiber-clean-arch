@@ -67,6 +67,127 @@ func (r *SQLRepository) FindIdentity(ctx context.Context, provider, subject stri
 	return row.toEntity()
 }
 
+// FindIdentityByID retrieves an identity by its primary key.
+func (r *SQLRepository) FindIdentityByID(ctx context.Context, id uuid.UUID) (*entity.Identity, error) {
+	query := r.db.Rebind(`
+		SELECT id, user_id, provider, subject, email, created_at, updated_at
+		FROM auth_identities
+		WHERE id = ?
+	`)
+	var row sqlIdentity
+	if err := r.db.GetContext(ctx, &row, query, id.String()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, repository.ErrIdentityNotFound
+		}
+		return nil, err
+	}
+	return row.toEntity()
+}
+
+// CreateSession inserts a refresh session.
+func (r *SQLRepository) CreateSession(ctx context.Context, session *entity.Session) error {
+	query := `
+		INSERT INTO auth_sessions (id, session_id, user_id, identity_id, token_hash, id_token, expires_at, used_at, revoked_at, created_at)
+		VALUES (:id, :session_id, :user_id, :identity_id, :token_hash, :id_token, :expires_at, :used_at, :revoked_at, :created_at)
+	`
+	params := map[string]interface{}{
+		"id":          session.ID.String(),
+		"session_id":  session.SessionID.String(),
+		"user_id":     session.UserID.String(),
+		"identity_id": session.IdentityID.String(),
+		"token_hash":  session.TokenHash,
+		"id_token":    session.IDToken,
+		"expires_at":  session.ExpiresAt,
+		"used_at":     session.UsedAt,
+		"revoked_at":  session.RevokedAt,
+		"created_at":  session.CreatedAt,
+	}
+
+	if _, err := r.db.NamedExecContext(ctx, query, params); err != nil {
+		return err
+	}
+	return nil
+}
+
+// FindSessionByHash retrieves a refresh session by its token hash.
+func (r *SQLRepository) FindSessionByHash(ctx context.Context, tokenHash string) (*entity.Session, error) {
+	query := r.db.Rebind(`
+		SELECT id, session_id, user_id, identity_id, token_hash, id_token, expires_at, used_at, revoked_at, created_at
+		FROM auth_sessions
+		WHERE token_hash = ?
+	`)
+	var row sqlSession
+	if err := r.db.GetContext(ctx, &row, query, tokenHash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, repository.ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return row.toEntity()
+}
+
+// ConsumeSession marks an unused session as used, atomically.
+func (r *SQLRepository) ConsumeSession(ctx context.Context, id uuid.UUID, usedAt time.Time) error {
+	// Both predicates are concurrency guards: used_at stops two refreshes from
+	// consuming one row, revoked_at stops a refresh that overlapped a logout.
+	query := r.db.Rebind(`UPDATE auth_sessions SET used_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL`)
+	result, err := r.db.ExecContext(ctx, query, usedAt, id.String())
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return repository.ErrSessionNotFound
+	}
+	return nil
+}
+
+// RevokeSessionFamily revokes every session sharing a rotation family.
+func (r *SQLRepository) RevokeSessionFamily(ctx context.Context, sessionID uuid.UUID, revokedAt time.Time) error {
+	query := r.db.Rebind(`UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`)
+	_, err := r.db.ExecContext(ctx, query, revokedAt, sessionID.String())
+	return err
+}
+
+type sqlSession struct {
+	ID         string     `db:"id"`
+	SessionID  string     `db:"session_id"`
+	UserID     string     `db:"user_id"`
+	IdentityID string     `db:"identity_id"`
+	TokenHash  string     `db:"token_hash"`
+	IDToken    string     `db:"id_token"`
+	ExpiresAt  time.Time  `db:"expires_at"`
+	UsedAt     *time.Time `db:"used_at"`
+	RevokedAt  *time.Time `db:"revoked_at"`
+	CreatedAt  time.Time  `db:"created_at"`
+}
+
+func (s sqlSession) toEntity() (*entity.Session, error) {
+	ids := make([]uuid.UUID, 0, 4)
+	for _, raw := range []string{s.ID, s.SessionID, s.UserID, s.IdentityID} {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, parsed)
+	}
+	return &entity.Session{
+		ID:         ids[0],
+		SessionID:  ids[1],
+		UserID:     ids[2],
+		IdentityID: ids[3],
+		TokenHash:  s.TokenHash,
+		IDToken:    s.IDToken,
+		ExpiresAt:  s.ExpiresAt,
+		UsedAt:     s.UsedAt,
+		RevokedAt:  s.RevokedAt,
+		CreatedAt:  s.CreatedAt,
+	}, nil
+}
+
 type sqlIdentity struct {
 	ID        string    `db:"id"`
 	UserID    string    `db:"user_id"`

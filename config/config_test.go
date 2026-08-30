@@ -27,6 +27,25 @@ func TestValidate_RejectsWeakProductionJWTSecret(t *testing.T) {
 	assert.ErrorContains(t, err, "APP_JWT_SECRET")
 }
 
+func TestValidate_RejectsRefreshTTLShorterThanAccessTTL(t *testing.T) {
+	cfg := validConfig()
+	cfg.JWT.AccessTTL = time.Hour
+	cfg.JWT.RefreshTTL = time.Minute
+
+	err := cfg.Validate()
+
+	assert.ErrorContains(t, err, "APP_JWT_REFRESH_TTL")
+}
+
+func TestValidate_RequiresPositiveAuthRateLimit(t *testing.T) {
+	cfg := validConfig()
+	cfg.Middleware.AuthRateLimit = 0
+
+	err := cfg.Validate()
+
+	assert.ErrorContains(t, err, "APP_AUTH_RATE_LIMIT")
+}
+
 func validConfig() *AppConfig {
 	return &AppConfig{
 		Name:        "clean-arch-starter",
@@ -41,11 +60,13 @@ func validConfig() *AppConfig {
 			DSN:    "postgres://app:app@localhost:5432/app?sslmode=disable",
 		},
 		JWT: JWTConfig{
-			Secret:    "test-secret-that-is-long-enough",
-			Issuer:    "clean-arch-starter",
-			Audience:  "clean-arch-starter-api",
-			AccessTTL: time.Minute,
+			Secret:     "test-secret-that-is-long-enough",
+			Issuer:     "clean-arch-starter",
+			Audience:   "clean-arch-starter-api",
+			AccessTTL:  time.Minute,
+			RefreshTTL: time.Hour,
 		},
+		Middleware: MiddlewareConfig{AuthRateLimit: 60},
 		OIDC: OIDCConfig{
 			Enabled:       false,
 			IssuerURL:     "https://issuer.example.com",

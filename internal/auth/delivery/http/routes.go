@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
@@ -32,7 +33,10 @@ func Register(app *fiber.App, container *bootstrap.Container) error {
 	if err != nil {
 		return err
 	}
-	provider, err := oidc.NewProvider(context.Background(), container.Config.OIDC)
+	// Bounded so an unreachable issuer fails startup instead of hanging it forever.
+	discoverCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	provider, err := oidc.NewProvider(discoverCtx, container.Config.OIDC)
 	if err != nil {
 		return err
 	}

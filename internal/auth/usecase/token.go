@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 
 	"github.com/casper/go-fiber-clean-arch/config"
 	authentity "github.com/casper/go-fiber-clean-arch/internal/auth/entity"
@@ -31,24 +32,29 @@ type Claims struct {
 
 // TokenService signs local API access tokens.
 type TokenService struct {
-	secret   []byte
-	issuer   string
-	audience string
-	ttl      time.Duration
+	secret     []byte
+	issuer     string
+	audience   string
+	ttl        time.Duration
+	refreshTTL time.Duration
 }
 
 // NewTokenService constructs a TokenService from JWT configuration.
 func NewTokenService(cfg config.JWTConfig) (*TokenService, error) {
-	if cfg.Secret == "" || cfg.Issuer == "" || cfg.Audience == "" || cfg.AccessTTL <= 0 {
+	if cfg.Secret == "" || cfg.Issuer == "" || cfg.Audience == "" || cfg.AccessTTL <= 0 || cfg.RefreshTTL <= 0 {
 		return nil, ErrInvalidTokenConfig
 	}
 	return &TokenService{
-		secret:   []byte(cfg.Secret),
-		issuer:   cfg.Issuer,
-		audience: cfg.Audience,
-		ttl:      cfg.AccessTTL,
+		secret:     []byte(cfg.Secret),
+		issuer:     cfg.Issuer,
+		audience:   cfg.Audience,
+		ttl:        cfg.AccessTTL,
+		refreshTTL: cfg.RefreshTTL,
 	}, nil
 }
+
+// RefreshTTL is how long an issued refresh token stays valid.
+func (s *TokenService) RefreshTTL() time.Duration { return s.refreshTTL }
 
 // Issue signs a short-lived bearer token for a local user.
 func (s *TokenService) Issue(user *userentity.User, identity *authentity.Identity) (*AccessToken, error) {
@@ -61,6 +67,10 @@ func (s *TokenService) Issue(user *userentity.User, identity *authentity.Identit
 		Provider:        identity.Provider,
 		ProviderSubject: identity.Subject,
 		RegisteredClaims: jwt.RegisteredClaims{
+			// Without a jti two tokens minted for the same user in the same second are
+			// byte-identical, since iat/exp only carry second resolution. A unique id
+			// also gives a revocation list something to key on later.
+			ID:        uuid.NewString(),
 			Subject:   user.ID.String(),
 			Issuer:    s.issuer,
 			Audience:  jwt.ClaimStrings{s.audience},

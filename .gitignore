@@ -19,6 +19,7 @@ coverage/
 # Environment & secrets
 .env
 .env.*
+!.env.example
 
 # IDE/editor noise
 .DS_Store

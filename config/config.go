@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,13 @@ type HTTPConfig struct {
 	Port         string
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+	// TrustedProxies lists the addresses allowed to set X-Forwarded-For. Empty means
+	// trust nobody and read the peer address, which is correct when the API is
+	// exposed directly. Behind a proxy this MUST be set, otherwise every request
+	// carries the proxy's address and the per-IP auth rate limit becomes one shared
+	// global bucket. Trusting the header unconditionally would be worse: any client
+	// could then forge an address and evade the limit outright.
+	TrustedProxies []string
 }
 
 // DatabaseConfig captures relational database connectivity details.
@@ -62,21 +70,23 @@ type MongoConfig struct {
 
 // JWTConfig defines authentication token defaults.
 type JWTConfig struct {
-	Secret    string
-	Issuer    string
-	Audience  string
-	AccessTTL time.Duration
+	Secret     string
+	Issuer     string
+	Audience   string
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
 }
 
 // OIDCConfig defines external OpenID Connect client configuration.
 type OIDCConfig struct {
-	Enabled       bool
-	IssuerURL     string
-	ClientID      string
-	ClientSecret  string
-	RedirectURL   string
-	Scopes        []string
-	LoginStateTTL time.Duration
+	Enabled               bool
+	IssuerURL             string
+	ClientID              string
+	ClientSecret          string
+	RedirectURL           string
+	PostLogoutRedirectURL string
+	Scopes                []string
+	LoginStateTTL         time.Duration
 }
 
 // LoggingConfig declares logging behaviour.
@@ -90,7 +100,12 @@ type MiddlewareConfig struct {
 	RequestLogger bool
 	Recovery      bool
 	CORS          bool
+	CORSOrigins   string
 	JWT           bool
+	// AuthRateLimit caps requests per minute per client IP across the auth
+	// endpoints. Keep it generous: clients behind one NAT share a budget, and
+	// every instance of an app refreshes on its own schedule.
+	AuthRateLimit int
 }
 
 // Load reads environment variables (optionally loading .env files) and produces
@@ -149,7 +164,9 @@ func Load(envFiles ...string) (*AppConfig, error) {
 		RequestLogger: v.GetBool("REQUEST_LOGGER_ENABLED"),
 		Recovery:      v.GetBool("RECOVERY_ENABLED"),
 		CORS:          v.GetBool("CORS_ENABLED"),
+		CORSOrigins:   strings.TrimSpace(v.GetString("CORS_ORIGINS")),
 		JWT:           v.GetBool("JWT_MIDDLEWARE_ENABLED"),
+		AuthRateLimit: v.GetInt("AUTH_RATE_LIMIT"),
 	}
 
 	cfg := &AppConfig{
@@ -209,6 +226,14 @@ func (c *AppConfig) Validate() error {
 		return errors.New("config: APP_JWT_ACCESS_TTL must be positive duration")
 	}
 
+	if c.JWT.RefreshTTL <= 0 {
+		return errors.New("config: APP_JWT_REFRESH_TTL must be positive duration")
+	}
+
+	if c.JWT.RefreshTTL < c.JWT.AccessTTL {
+		return errors.New("config: APP_JWT_REFRESH_TTL must not be shorter than APP_JWT_ACCESS_TTL")
+	}
+
 	if c.OIDC.Enabled {
 		if c.OIDC.IssuerURL == "" {
 			return errors.New("config: APP_OIDC_ISSUER_URL is required when OIDC is enabled")
@@ -225,9 +250,13 @@ func (c *AppConfig) Validate() error {
 		if c.OIDC.LoginStateTTL <= 0 {
 			return errors.New("config: APP_OIDC_LOGIN_STATE_TTL must be positive duration")
 		}
-		if !contains(c.OIDC.Scopes, "openid") {
+		if !slices.Contains(c.OIDC.Scopes, "openid") {
 			return errors.New("config: APP_OIDC_SCOPES must include openid")
 		}
+	}
+
+	if c.Middleware.AuthRateLimit <= 0 {
+		return errors.New("config: APP_AUTH_RATE_LIMIT must be a positive number of requests per minute")
 	}
 
 	if c.HTTP.Port == "" {
@@ -247,6 +276,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("HTTP.PORT", "8080")
 	v.SetDefault("HTTP.READ_TIMEOUT", "10s")
 	v.SetDefault("HTTP.WRITE_TIMEOUT", "10s")
+	v.SetDefault("HTTP.TRUSTED_PROXIES", "")
 
 	v.SetDefault("DATABASE.DRIVER", driverPostgres)
 	v.SetDefault("DATABASE.DSN", "postgres://app:app@localhost:5432/app?sslmode=disable")
@@ -262,12 +292,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("JWT.ISSUER", "clean-arch-starter")
 	v.SetDefault("JWT.AUDIENCE", "clean-arch-starter-api")
 	v.SetDefault("JWT.ACCESS_TTL", "15m")
+	v.SetDefault("JWT.REFRESH_TTL", "168h")
 
 	v.SetDefault("OIDC.ENABLED", false)
 	v.SetDefault("OIDC.ISSUER_URL", "")
 	v.SetDefault("OIDC.CLIENT_ID", "")
 	v.SetDefault("OIDC.CLIENT_SECRET", "")
 	v.SetDefault("OIDC.REDIRECT_URL", "")
+	v.SetDefault("OIDC.POST_LOGOUT_REDIRECT_URL", "")
 	v.SetDefault("OIDC.SCOPES", "openid profile email")
 	v.SetDefault("OIDC.LOGIN_STATE_TTL", "5m")
 
@@ -277,7 +309,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("REQUEST_LOGGER_ENABLED", true)
 	v.SetDefault("RECOVERY_ENABLED", true)
 	v.SetDefault("CORS_ENABLED", true)
+	v.SetDefault("CORS_ORIGINS", "*")
 	v.SetDefault("JWT_MIDDLEWARE_ENABLED", true)
+	v.SetDefault("AUTH_RATE_LIMIT", 60)
 }
 
 func parseHTTPConfig(v *viper.Viper) (HTTPConfig, error) {
@@ -292,9 +326,10 @@ func parseHTTPConfig(v *viper.Viper) (HTTPConfig, error) {
 	}
 
 	return HTTPConfig{
-		Port:         strings.TrimSpace(v.GetString("HTTP.PORT")),
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
+		Port:           strings.TrimSpace(v.GetString("HTTP.PORT")),
+		ReadTimeout:    readTimeout,
+		WriteTimeout:   writeTimeout,
+		TrustedProxies: parseList(v.GetString("HTTP.TRUSTED_PROXIES")),
 	}, nil
 }
 
@@ -331,11 +366,17 @@ func parseJWTConfig(v *viper.Viper) (JWTConfig, error) {
 		return JWTConfig{}, fmt.Errorf("config: invalid APP_JWT_ACCESS_TTL: %w", err)
 	}
 
+	refreshTTL, err := time.ParseDuration(v.GetString("JWT.REFRESH_TTL"))
+	if err != nil {
+		return JWTConfig{}, fmt.Errorf("config: invalid APP_JWT_REFRESH_TTL: %w", err)
+	}
+
 	return JWTConfig{
-		Secret:    strings.TrimSpace(v.GetString("JWT.SECRET")),
-		Issuer:    strings.TrimSpace(v.GetString("JWT.ISSUER")),
-		Audience:  strings.TrimSpace(v.GetString("JWT.AUDIENCE")),
-		AccessTTL: ttl,
+		Secret:     strings.TrimSpace(v.GetString("JWT.SECRET")),
+		Issuer:     strings.TrimSpace(v.GetString("JWT.ISSUER")),
+		Audience:   strings.TrimSpace(v.GetString("JWT.AUDIENCE")),
+		AccessTTL:  ttl,
+		RefreshTTL: refreshTTL,
 	}, nil
 }
 
@@ -346,45 +387,39 @@ func parseOIDCConfig(v *viper.Viper) (OIDCConfig, error) {
 	}
 
 	return OIDCConfig{
-		Enabled:       v.GetBool("OIDC.ENABLED"),
-		IssuerURL:     strings.TrimRight(strings.TrimSpace(v.GetString("OIDC.ISSUER_URL")), "/"),
-		ClientID:      strings.TrimSpace(v.GetString("OIDC.CLIENT_ID")),
-		ClientSecret:  strings.TrimSpace(v.GetString("OIDC.CLIENT_SECRET")),
-		RedirectURL:   strings.TrimSpace(v.GetString("OIDC.REDIRECT_URL")),
-		Scopes:        parseScopes(v.GetString("OIDC.SCOPES")),
-		LoginStateTTL: ttl,
+		Enabled:               v.GetBool("OIDC.ENABLED"),
+		IssuerURL:             strings.TrimRight(strings.TrimSpace(v.GetString("OIDC.ISSUER_URL")), "/"),
+		ClientID:              strings.TrimSpace(v.GetString("OIDC.CLIENT_ID")),
+		ClientSecret:          strings.TrimSpace(v.GetString("OIDC.CLIENT_SECRET")),
+		RedirectURL:           strings.TrimSpace(v.GetString("OIDC.REDIRECT_URL")),
+		PostLogoutRedirectURL: strings.TrimSpace(v.GetString("OIDC.POST_LOGOUT_REDIRECT_URL")),
+		Scopes:                parseScopes(v.GetString("OIDC.SCOPES")),
+		LoginStateTTL:         ttl,
 	}, nil
 }
 
 func parseScopes(value string) []string {
 	seen := make(map[string]struct{})
 	scopes := make([]string, 0)
-	for _, scope := range strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || r == ' ' || r == '\n' || r == '\t'
-	}) {
-		scope = strings.TrimSpace(scope)
-		if scope == "" {
-			continue
-		}
+	for _, scope := range parseList(value) {
 		if _, ok := seen[scope]; ok {
 			continue
 		}
 		seen[scope] = struct{}{}
 		scopes = append(scopes, scope)
 	}
-	if !contains(scopes, "openid") {
+	if !slices.Contains(scopes, "openid") {
 		scopes = append([]string{"openid"}, scopes...)
 	}
 	return scopes
 }
 
-func contains(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
+// parseList splits a comma or whitespace separated setting. FieldsFunc splits on runs
+// of separators, so it never yields empty or padded values.
+func parseList(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t'
+	})
 }
 
 func parseBool(val string) bool {

@@ -42,10 +42,19 @@ func main() {
 		}
 	}()
 
-	app := fiber.New(fiber.Config{
+	fiberCfg := fiber.Config{
 		AppName:      cfg.Name,
 		ErrorHandler: errorHandler(container),
-	})
+	}
+	if len(cfg.HTTP.TrustedProxies) > 0 {
+		// Without this the auth rate limiter keys every request behind a proxy to the
+		// proxy's own address, turning a per-client budget into one global bucket.
+		fiberCfg.ProxyHeader = fiber.HeaderXForwardedFor
+		fiberCfg.EnableTrustedProxyCheck = true
+		fiberCfg.TrustedProxies = cfg.HTTP.TrustedProxies
+	}
+
+	app := fiber.New(fiberCfg)
 
 	middleware.Register(app, cfg, container.Logger)
 

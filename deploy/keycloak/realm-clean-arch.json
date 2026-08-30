@@ -1,0 +1,71 @@
+{
+  "realm": "clean-arch",
+  "enabled": true,
+  "displayName": "Clean Arch Starter",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "clients": [
+    {
+      "clientId": "clean-arch-api",
+      "name": "Clean Arch API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "secret": "clean-arch-dev-secret",
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://localhost:8080/api/v1/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:8080"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8080/*##http://localhost:3000/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "ada",
+      "enabled": true,
+      "email": "ada@example.com",
+      "emailVerified": true,
+      "firstName": "Ada",
+      "lastName": "Lovelace",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ada",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "grace",
+      "enabled": true,
+      "email": "grace@example.com",
+      "emailVerified": false,
+      "firstName": "Grace",
+      "lastName": "Hopper",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "grace",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

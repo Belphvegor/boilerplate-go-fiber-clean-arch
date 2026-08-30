@@ -70,12 +70,52 @@ services:
     profiles:
       - mongo
 
+  # Keycloak OIDC provider (docker compose --profile keycloak up -d keycloak)
+  # Dev mode: H2 store, no data volume, so `down` gives a clean slate and the realm
+  # below is re-imported on every recreate. Startup import SKIPS an existing realm.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: clean-arch-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # 26.x names. KEYCLOAK_ADMIN/_PASSWORD are deprecated and leave you with no admin.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # The `iss` claim is built from this. It must match APP_OIDC_ISSUER_URL's origin
+      # byte-for-byte or go-oidc rejects the ID token with an issuer mismatch.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./deploy/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # Health is on the management port 9000, not 8080, and the image ships no curl
+      # or wget. This is Keycloak's own documented /dev/tcp probe. Keep it a
+      # single-quoted YAML scalar: a double-quoted one turns \r\n into real control
+      # characters before bash sees them and the request goes out malformed.
+      test:
+        - CMD-SHELL
+        - '{ printf "HEAD /health/ready HTTP/1.0\r\n\r\n" >&0; grep "HTTP/1.0 200"; } 0<>/dev/tcp/localhost/9000'
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - clean_arch
+    profiles:
+      - keycloak
+
   # Migration helper (docker compose --profile migrate run --rm migrator)
   migrator:
     image: migrate/migrate:v4.17.1
     container_name: clean-arch-migrator
     entrypoint: ["/bin/sh", "-c"]
-    command: "${MIGRATION_CMD:-echo \"Set MIGRATION_CMD to run migrations\"}"
+    # List form with ONE element: string form would be word-split into argv and
+    # `sh -c` would run only the first token.
+    command:
+      - "${MIGRATION_CMD:-echo Set MIGRATION_CMD to run migrations}"
     volumes:
       - ./db/migrations:/migrations
     networks:

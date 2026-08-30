@@ -17,10 +17,11 @@ import (
 
 func TestJWTProtected(t *testing.T) {
 	cfg := config.JWTConfig{
-		Secret:    "test-secret-that-is-long-enough",
-		Issuer:    "clean-arch-starter",
-		Audience:  "clean-arch-starter-api",
-		AccessTTL: time.Minute,
+		Secret:     "test-secret-that-is-long-enough",
+		Issuer:     "clean-arch-starter",
+		Audience:   "clean-arch-starter-api",
+		AccessTTL:  time.Minute,
+		RefreshTTL: time.Hour,
 	}
 	tokens, err := usecase.NewTokenService(cfg)
 	require.NoError(t, err)
