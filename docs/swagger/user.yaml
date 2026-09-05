@@ -25,7 +25,7 @@ paths:
   /auth/callback:
     get:
       summary: Complete OIDC login
-      description: Validates the provider callback and returns a local Bearer access token.
+      description: Validates the provider callback and returns a local access/refresh token pair.
       operationId: completeOIDCLogin
       parameters:
         - name: code
@@ -53,6 +53,93 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Login not authorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      tags:
+        - Auth
+  /auth/refresh:
+    post:
+      summary: Refresh local tokens
+      operationId: refreshAuthTokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token pair rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Refresh token invalid, expired, or reused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: OIDC disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      tags:
+        - Auth
+  /auth/logout:
+    post:
+      summary: Revoke the local session
+      description: Revokes the refresh-token family and returns the provider logout URL.
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Refresh token invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: OIDC disabled
           content:
             application/json:
               schema:
@@ -174,6 +261,14 @@ components:
         email:
           type: string
           format: email
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
     AuthTokenResponse:
       type: object
       properties:
@@ -188,8 +283,21 @@ components:
             expires_in:
               type: integer
               format: int64
+            refresh_token:
+              type: string
+            refresh_expires_in:
+              type: integer
+              format: int64
             user:
               $ref: '#/components/schemas/UserResponse'
+    LogoutResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            logout_url:
+              type: string
     ErrorResponse:
       type: object
       properties:

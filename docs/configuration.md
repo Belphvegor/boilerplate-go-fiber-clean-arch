@@ -41,7 +41,7 @@ The starter reads configuration exclusively from environment variables (loadable
 
 ## OAuth2 / OpenID Connect
 
-The API acts as an OIDC client. `GET /api/v1/auth/login` starts Authorization Code + PKCE login, and `GET /api/v1/auth/callback` validates the ID token, links the stable provider/subject identity, and returns a short-lived local Bearer token.
+The API acts as an OIDC client. `GET /api/v1/auth/login` starts Authorization Code + PKCE login, and `GET /api/v1/auth/callback` validates the ID token, links the stable provider/subject identity, and returns a local access/refresh token pair.
 
 For production:
 
@@ -75,6 +75,9 @@ How the refresh token behaves, and why:
   trigger this on itself — single-flight the call.
 - **Rotation does not extend the deadline.** The successor inherits the original expiry,
   so `APP_JWT_REFRESH_TTL` is a hard ceiling on a session, not a sliding window.
+- **Expired history is pruned on successful login.** This keeps the starter free of a
+  scheduler while preventing unbounded growth. Move it to a periodic database job only
+  if cleanup time becomes measurable at production scale.
 - **The API never rejects a replay differently.** Replay and "unknown token" both return
   401 with the same body; the distinction only appears in the server log.
 - **A refresh that overlaps a logout loses.** Consuming a token requires the row to be

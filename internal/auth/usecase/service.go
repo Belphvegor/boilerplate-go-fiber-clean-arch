@@ -181,16 +181,7 @@ func (s *Service) Refresh(ctx context.Context, rawToken string) (*TokenResponse,
 
 	now := time.Now().UTC()
 	if session.UsedAt != nil {
-		if revokeErr := s.authRepo.RevokeSessionFamily(ctx, session.SessionID, now); revokeErr != nil {
-			s.logger.Error().Err(revokeErr).
-				Str("session_id", session.SessionID.String()).
-				Msg("could not revoke replayed refresh token family")
-		}
-		s.logger.Warn().
-			Str("user_id", session.UserID.String()).
-			Str("session_id", session.SessionID.String()).
-			Msg("refresh token replay detected; session revoked")
-		return nil, ErrRefreshReused
+		return nil, s.rejectReusedRefresh(ctx, session, now)
 	}
 	// Expiry only: ConsumeSession's revoked_at predicate re-checks revocation atomically,
 	// and UsedAt was handled by the replay branch above.
@@ -201,6 +192,13 @@ func (s *Service) Refresh(ctx context.Context, rawToken string) (*TokenResponse,
 	// Atomic compare-and-swap: two concurrent refreshes race here and exactly one wins.
 	if err := s.authRepo.ConsumeSession(ctx, session.ID, now); err != nil {
 		if errors.Is(err, authrepo.ErrSessionNotFound) {
+			current, findErr := s.authRepo.FindSessionByHash(ctx, session.TokenHash)
+			if findErr == nil && current.UsedAt != nil {
+				return nil, s.rejectReusedRefresh(ctx, current, now)
+			}
+			if findErr != nil && !errors.Is(findErr, authrepo.ErrSessionNotFound) {
+				return nil, findErr
+			}
 			return nil, ErrInvalidRefresh
 		}
 		return nil, err
@@ -287,6 +285,12 @@ func (s *Service) Logout(ctx context.Context, rawToken string) (string, error) {
 }
 
 func (s *Service) startSession(ctx context.Context, user *userentity.User, identity *authentity.Identity, idToken string) (*authentity.Session, string, error) {
+	// ponytail: opportunistic retention avoids a scheduler in the starter. Move this
+	// to a periodic database job only if login traffic makes cleanup latency visible.
+	if err := s.authRepo.DeleteExpiredSessions(ctx, time.Now().UTC()); err != nil {
+		s.logger.Warn().Err(err).Msg("could not delete expired auth sessions")
+	}
+
 	raw, err := randomURLToken()
 	if err != nil {
 		return nil, "", err
@@ -299,6 +303,19 @@ func (s *Service) startSession(ctx context.Context, user *userentity.User, ident
 		return nil, "", err
 	}
 	return session, raw, nil
+}
+
+func (s *Service) rejectReusedRefresh(ctx context.Context, session *authentity.Session, now time.Time) error {
+	if err := s.authRepo.RevokeSessionFamily(ctx, session.SessionID, now); err != nil {
+		s.logger.Error().Err(err).
+			Str("session_id", session.SessionID.String()).
+			Msg("could not revoke replayed refresh token family")
+	}
+	s.logger.Warn().
+		Str("user_id", session.UserID.String()).
+		Str("session_id", session.SessionID.String()).
+		Msg("refresh token replay detected; session revoked")
+	return ErrRefreshReused
 }
 
 func (s *Service) rotateSession(ctx context.Context, previous *authentity.Session) (*authentity.Session, string, error) {

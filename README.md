@@ -59,7 +59,7 @@ go test ./...                # Run unit tests
 go run ./cmd/api             # Start the Fiber server
 ```
 
-Additional commands cover linting (`make -C scripts lint`) and database migrations (`make -C scripts migrate-up`). Adjust or extend the Makefile to match your team's tooling preferences.
+Linting is available through `make -C scripts lint`. The exact local PostgreSQL migration command is documented in [`docs/quickstart.md`](docs/quickstart.md); the `migrate-*` Make targets remain placeholders until the project chooses a host-side migration runner.
 
 ## Documentation Map
 

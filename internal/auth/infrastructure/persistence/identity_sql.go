@@ -152,6 +152,13 @@ func (r *SQLRepository) RevokeSessionFamily(ctx context.Context, sessionID uuid.
 	return err
 }
 
+// DeleteExpiredSessions removes session families after their fixed deadline.
+func (r *SQLRepository) DeleteExpiredSessions(ctx context.Context, before time.Time) error {
+	query := r.db.Rebind(`DELETE FROM auth_sessions WHERE expires_at <= ?`)
+	_, err := r.db.ExecContext(ctx, query, before)
+	return err
+}
+
 type sqlSession struct {
 	ID         string     `db:"id"`
 	SessionID  string     `db:"session_id"`

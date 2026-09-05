@@ -42,7 +42,7 @@ Sentinel errors are re-exported upward (`usecase.ErrEmailExists = repository.Err
 ### The two domains
 
 - **`internal/user`** — CRUD reference module. `/api/v1/users`, JWT-guarded when `APP_JWT_MIDDLEWARE_ENABLED=true`.
-- **`internal/auth`** — OAuth2/OIDC login, refresh, and logout. `GET /api/v1/auth/login` (sets short-lived `oidc_state` / `oidc_nonce` / `oidc_verifier` HTTP-only cookies scoped to `/api/v1/auth`, redirects to the provider) and `GET /api/v1/auth/callback` (verifies state+nonce+PKCE, auto-provisions a `users` row + `auth_identities` row, returns a locally signed HS256 access token). When `APP_OIDC_ENABLED=false`, `DisabledHandler` registers the same two paths returning 503 — so route shape stays stable.
+- **`internal/auth`** — OAuth2/OIDC login, refresh, and logout. `GET /api/v1/auth/login` redirects with state+nonce+PKCE, `GET /api/v1/auth/callback` verifies the provider response and returns a local access/refresh pair, `POST /api/v1/auth/refresh` rotates the refresh token, and `POST /api/v1/auth/logout` revokes its family. When `APP_OIDC_ENABLED=false`, `DisabledHandler` registers the same four paths returning 503.
 
 Auth depends on the user module's repository (cross-domain wiring lives in `internal/auth/delivery/http/routes.go`, not in the use case).
 
@@ -96,7 +96,7 @@ These are unfinished parts of the starter, not bugs to be surprised by. `docs/bo
 - **No password login.** `usecase.Service.Register` stores a bcrypt hash that nothing verifies. Tokens come only from the OIDC flow, so either run Keycloak (below) or set `APP_JWT_MIDDLEWARE_ENABLED=false`.
 - **No authorization rules** beyond "valid token" — a route sees `auth.user_id` and nothing else.
 - **Access tokens are not revocable.** Refresh tokens rotate and can be revoked, but an issued access token stays valid until `exp`, so revocation latency equals `APP_JWT_ACCESS_TTL`. Every token now carries a `jti`, which is what a denylist would key on if one is ever added.
-- **Expired and spent session rows are never pruned.** `auth_sessions` grows one row per refresh; used rows must be kept for replay detection. Add a periodic delete of rows past `expires_at` before this runs long in production.
+- **Session cleanup runs on successful login.** `auth_sessions` keeps spent rows until the fixed family expiry for replay detection, then opportunistically deletes them. Move cleanup to a periodic database job only if login-path cleanup becomes measurable at production scale.
 - **Email-based account linking is unconditional.** `resolveProvisionedUser` attaches an OIDC login to any existing local user with the same verified email. Safe with one trusted issuer, but it becomes a takeover path once a second IdP or password login exists, because `POST /api/v1/users` accepts arbitrary emails. Marked with a `ponytail:` comment in `internal/auth/usecase/service.go`.
 - **No FK from `auth_identities.user_id` to `users.id`.** Migration order puts identities first, and the `ALTER`/`DROP` syntax differs between Postgres and MySQL, which would break the one-adapter-serves-both convention. Orphan identities are possible.
 

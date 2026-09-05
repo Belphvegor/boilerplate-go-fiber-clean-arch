@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -124,6 +125,17 @@ func TestService_CompleteLogin_RejectsMissingNonceCookie(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrInvalidCallback))
 }
 
+func TestService_CompleteLogin_PrunesExpiredSessions(t *testing.T) {
+	authRepo := newMemoryAuthRepo()
+	authRepo.sessions["expired"] = &authentity.Session{TokenHash: "expired", ExpiresAt: time.Now().Add(-time.Hour)}
+	authRepo.sessions["live"] = &authentity.Session{TokenHash: "live", ExpiresAt: time.Now().Add(time.Hour)}
+
+	_, _ = loginForTestWith(t, authRepo)
+
+	assert.NotContains(t, authRepo.sessions, "expired")
+	assert.Contains(t, authRepo.sessions, "live")
+}
+
 func TestService_Refresh_RotatesAndInvalidatesThePreviousToken(t *testing.T) {
 	service, first := loginForTest(t)
 
@@ -153,6 +165,38 @@ func TestService_Refresh_ReplayRevokesTheWholeFamily(t *testing.T) {
 	_, err = service.Refresh(context.Background(), second.RefreshToken)
 	assert.True(t, errors.Is(err, ErrInvalidRefresh),
 		"replay must revoke the whole family, including the currently valid token")
+}
+
+func TestService_Refresh_ConcurrentUseRevokesTheWholeFamily(t *testing.T) {
+	authRepo := newConcurrentAuthRepo()
+	service, first := loginForTestWith(t, authRepo)
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := service.Refresh(context.Background(), first.RefreshToken)
+			errs <- err
+		}()
+	}
+
+	reused := 0
+	for range 2 {
+		err := <-errs
+		switch {
+		case errors.Is(err, ErrRefreshReused):
+			reused++
+		case err == nil, errors.Is(err, ErrInvalidRefresh):
+		default:
+			require.NoError(t, err)
+		}
+	}
+	require.Equal(t, 1, reused, "exactly the losing concurrent refresh must be detected as replay")
+
+	authRepo.mu.Lock()
+	defer authRepo.mu.Unlock()
+	for hash, session := range authRepo.sessions {
+		assert.NotNilf(t, session.RevokedAt, "session %s survived concurrent refresh", hash)
+	}
 }
 
 func TestService_Refresh_RejectsUnknownToken(t *testing.T) {
@@ -332,6 +376,15 @@ func (r *memoryAuthRepo) RevokeSessionFamily(ctx context.Context, sessionID uuid
 	return nil
 }
 
+func (r *memoryAuthRepo) DeleteExpiredSessions(ctx context.Context, before time.Time) error {
+	for hash, session := range r.sessions {
+		if !session.ExpiresAt.After(before) {
+			delete(r.sessions, hash)
+		}
+	}
+	return nil
+}
+
 func (r *memoryAuthRepo) CreateIdentity(ctx context.Context, identity *authentity.Identity) error {
 	key := identity.Provider + "\x00" + identity.Subject
 	if _, exists := r.identities[key]; exists {
@@ -347,6 +400,60 @@ func (r *memoryAuthRepo) FindIdentity(ctx context.Context, provider, subject str
 		return nil, authrepo.ErrIdentityNotFound
 	}
 	return identity, nil
+}
+
+// concurrentAuthRepo makes the first two refreshes read the same unused token,
+// then serializes mutations so the race is deterministic and map-safe.
+type concurrentAuthRepo struct {
+	*memoryAuthRepo
+	mu           sync.Mutex
+	initialReads int
+	readBarrier  chan struct{}
+}
+
+func newConcurrentAuthRepo() *concurrentAuthRepo {
+	return &concurrentAuthRepo{memoryAuthRepo: newMemoryAuthRepo(), readBarrier: make(chan struct{})}
+}
+
+func (r *concurrentAuthRepo) CreateSession(ctx context.Context, session *authentity.Session) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.memoryAuthRepo.CreateSession(ctx, session)
+}
+
+func (r *concurrentAuthRepo) FindSessionByHash(ctx context.Context, tokenHash string) (*authentity.Session, error) {
+	r.mu.Lock()
+	session, err := r.memoryAuthRepo.FindSessionByHash(ctx, tokenHash)
+	wait := r.initialReads < 2
+	if wait {
+		r.initialReads++
+		if r.initialReads == 2 {
+			close(r.readBarrier)
+		}
+	}
+	r.mu.Unlock()
+	if wait {
+		<-r.readBarrier
+	}
+	return session, err
+}
+
+func (r *concurrentAuthRepo) ConsumeSession(ctx context.Context, id uuid.UUID, usedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.memoryAuthRepo.ConsumeSession(ctx, id, usedAt)
+}
+
+func (r *concurrentAuthRepo) RevokeSessionFamily(ctx context.Context, sessionID uuid.UUID, revokedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.memoryAuthRepo.RevokeSessionFamily(ctx, sessionID, revokedAt)
+}
+
+func (r *concurrentAuthRepo) DeleteExpiredSessions(ctx context.Context, before time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.memoryAuthRepo.DeleteExpiredSessions(ctx, before)
 }
 
 type memoryUserRepo struct {

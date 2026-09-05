@@ -31,4 +31,6 @@ type Repository interface {
 	// RevokeSessionFamily revokes every session sharing sessionID, which ends the
 	// login both on logout and on detected token replay.
 	RevokeSessionFamily(ctx context.Context, sessionID uuid.UUID, revokedAt time.Time) error
+	// DeleteExpiredSessions removes rotation history after it can no longer be used.
+	DeleteExpiredSessions(ctx context.Context, before time.Time) error
 }

@@ -426,6 +426,8 @@ func cleanupUser(t *testing.T, container *bootstrap.Container, email string) {
 	}
 	db := container.DB.SQL
 	_, _ = db.Exec(db.Rebind(
+		"DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE email = ?)"), email)
+	_, _ = db.Exec(db.Rebind(
 		"DELETE FROM auth_identities WHERE user_id IN (SELECT id FROM users WHERE email = ?)"), email)
 	_, _ = db.Exec(db.Rebind("DELETE FROM users WHERE email = ?"), email)
 }

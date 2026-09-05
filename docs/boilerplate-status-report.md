@@ -18,7 +18,7 @@ This repository is a Go 1.22 Fiber API boilerplate using clean architecture boun
 - Documentation for configuration, architecture, observability, quickstart, and OpenAPI.
 - Makefile automation for build, test, format, lint, and migrations.
 
-The boilerplate is suitable as a production-oriented starting point, but it is not a finished product. Teams still need to configure a real OIDC provider, add production-grade migrations tooling, tighten CORS, decide refresh-token/session policy, and add app-specific authorization rules.
+The boilerplate is suitable as a production-oriented starting point, but it is not a finished product. It includes a local Keycloak provider; teams still need to configure their production OIDC provider, add production-grade migration tooling, tighten CORS, and add app-specific authorization rules.
 
 ## Current Architecture
 
@@ -63,12 +63,17 @@ Implemented flow:
    - Validates nonce.
    - Resolves a local user.
    - Links the external provider identity by stable `(provider, subject)`.
-   - Returns a short-lived local Bearer access token as JSON.
+   - Returns a short-lived local Bearer token and rotating refresh token as JSON.
 
-3. Protected routes
+3. `POST /api/v1/auth/refresh` and `POST /api/v1/auth/logout`
+   - Rotates one-time refresh tokens and detects replay.
+   - Revokes the local session family on logout.
+   - Returns the provider logout URL so the client can end the Keycloak SSO session.
+
+4. Protected routes
    - Local API JWTs are verified by route-level middleware.
    - `GET /api/v1/users/:id` is protected when `APP_JWT_MIDDLEWARE_ENABLED=true`.
-   - `POST /api/v1/users`, `/healthz`, `/api/v1/auth/login`, and `/api/v1/auth/callback` remain public.
+   - `POST /api/v1/users`, `/healthz`, and all `/api/v1/auth/*` endpoints remain public at the JWT-middleware layer.
 
 Important design choices:
 
@@ -77,7 +82,7 @@ Important design choices:
 - Provider identity uses issuer/provider plus subject, not email alone.
 - First successful OIDC login auto-provisions a local user if the provider returns a verified email.
 - The API issues short-lived local Bearer access tokens.
-- Refresh tokens are not implemented yet.
+- Opaque refresh tokens are hashed at rest, rotated, and bounded by a fixed expiry.
 - Password registration remains available.
 
 Core auth files:
@@ -215,6 +220,10 @@ Current migration files:
 
 - `db/migrations/001_create_auth_identities.up.sql`
 - `db/migrations/001_create_auth_identities.down.sql`
+- `db/migrations/002_create_users.up.sql`
+- `db/migrations/002_create_users.down.sql`
+- `db/migrations/003_create_auth_sessions.up.sql`
+- `db/migrations/003_create_auth_sessions.down.sql`
 
 Important caveat: the migration area exists, and the Makefile has migration commands, but the actual `cmd/tools/migrate` command referenced by the Makefile is not present yet. A team should add or wire a real migration runner before relying on migrations in production deployments.
 
@@ -263,7 +272,7 @@ Authentication follows good baseline practices for an OIDC client:
 - Stable provider-subject identity mapping.
 - Short-lived local API tokens.
 
-The code keeps the first version simple. It does not try to implement a full OAuth authorization server, refresh token rotation, account management UI, organization membership, or policy engine before the app needs them.
+The code keeps the first version simple. It does not try to implement a full OAuth authorization server, account management UI, organization membership, or policy engine before the app needs them.
 
 The repository supports multiple persistence backends. This is useful for a boilerplate because teams can start with PostgreSQL, MySQL, or MongoDB without rewriting the domain layer.
 
@@ -271,7 +280,9 @@ The docs are already organized around real engineer workflows: quickstart, confi
 
 ## Current Limitations And Risks
 
-Refresh tokens are not implemented. Users must re-authenticate when the local access token expires. This is simple and safer for v1, but not ideal for long-lived browser or mobile sessions.
+Access tokens are not immediately revocable and remain valid until their short expiry.
+Refresh-session history is removed opportunistically on successful login; move cleanup to
+a scheduled database job only if login-path cleanup becomes measurable at production scale.
 
 Authorization is minimal. The API authenticates users but does not yet enforce ownership checks, roles, permissions, organizations, or scopes. For example, a valid token can reach the protected user-read route; the handler does not yet verify that the requester may read that specific user.
 
@@ -279,7 +290,9 @@ Migration tooling is incomplete. Migration files exist, but the Makefile referen
 
 CORS uses Fiber's default permissive middleware when enabled. Production deployments should configure allowed origins, methods, and headers explicitly.
 
-OIDC provider testing is mostly mocked. The auth use case and handlers are tested, but there is no full local Keycloak/Auth0-compatible integration test yet.
+The real Keycloak flow has an opt-in PostgreSQL E2E test covering login, verified-email
+provisioning, local JWT access, refresh rotation/replay, and provider logout. MySQL and
+MongoDB still rely on shared use-case tests rather than provider E2E coverage.
 
 The SQL migration is intentionally generic. Teams may need database-specific improvements such as PostgreSQL UUID types, foreign keys to `users(id)`, index naming, and timestamp precision.
 
@@ -287,7 +300,8 @@ Mongo indexes are created lazily by the auth repository. This is convenient for 
 
 The password registration path still exists alongside OIDC. That is useful for flexibility, but a real product should decide whether password login is supported, disabled, or moved behind a feature flag.
 
-No rate limiting is currently applied to auth endpoints. Public endpoints such as login, callback, and registration should have rate limits before internet exposure.
+Auth endpoints have a configurable per-IP rate limit. Public user registration is not
+rate-limited yet and should be protected before internet exposure.
 
 No CSRF policy is needed for Bearer-only API usage, but if the project later moves tokens into cookies, CSRF protection must be added.
 
@@ -300,18 +314,12 @@ Observability is basic. Request logs and Zerolog are present, but there are no d
 For production readiness:
 
 1. Add a real migration runner under `cmd/tools/migrate` or replace Makefile migration commands with the team's migration tool.
-2. Add provider-specific local development documentation, preferably with Keycloak in Docker Compose.
-3. Add full OIDC integration tests against a local provider.
-4. Add authorization checks for protected domain actions.
-5. Configure strict CORS for production.
-6. Add rate limiting for public auth and registration endpoints.
-7. Decide refresh-token strategy:
-   - keep access-token-only for simple internal tools,
-   - add rotating refresh tokens for browser/mobile apps,
-   - or integrate with provider session renewal.
-8. Add structured audit logs for login success, login failure, identity link, and suspicious callback failures.
-9. Add SQL foreign keys and database-specific migration variants if the production database is known.
-10. Update `README.md` to link this report and the auth flow once the team has settled the final provider.
+2. Add authorization checks for protected domain actions.
+3. Configure strict CORS for production.
+4. Add rate limiting for public user registration.
+5. Add structured audit logs for login success, login failure, identity link, and suspicious callback failures.
+6. Add SQL foreign keys and database-specific migration variants if the production database is known.
+7. Move expired-session cleanup to a scheduled database job if session volume makes opportunistic cleanup too slow.
 
 ## Junior Engineer Guide
 
@@ -351,4 +359,7 @@ When changing persistence, update:
 
 ## Final Assessment
 
-This boilerplate is in a healthy state for a starter project. It has a clean structure, practical defaults, a working example domain, and a real OIDC authentication foundation. The most important remaining work is not to add more abstraction, but to complete deployment-level production concerns: migrations, provider integration testing, authorization policy, CORS, rate limiting, and operational observability.
+This boilerplate is in a healthy state for a starter project. It has a clean structure,
+practical defaults, a working example domain, and a Keycloak-backed local OIDC flow. The
+remaining work is deployment-specific: migrations, authorization policy, strict CORS,
+registration rate limiting, and operational observability.

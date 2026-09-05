@@ -136,6 +136,12 @@ func (r *MongoRepository) RevokeSessionFamily(ctx context.Context, sessionID uui
 	return err
 }
 
+// DeleteExpiredSessions removes session families after their fixed deadline.
+func (r *MongoRepository) DeleteExpiredSessions(ctx context.Context, before time.Time) error {
+	_, err := r.sessions.DeleteMany(ctx, bson.M{"expires_at": bson.M{"$lte": before}})
+	return err
+}
+
 func (r *MongoRepository) ensureSessionIndexes(ctx context.Context) error {
 	r.sessionOnce.Do(func() {
 		_, r.sessionErr = r.sessions.Indexes().CreateMany(ctx, []mongo.IndexModel{
