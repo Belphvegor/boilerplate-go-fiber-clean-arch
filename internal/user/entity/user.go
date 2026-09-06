@@ -20,16 +20,15 @@ var (
 
 // User represents the core domain entity.
 type User struct {
-	ID           uuid.UUID
-	Name         string
-	Email        string
-	PasswordHash string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID        uuid.UUID
+	Name      string
+	Email     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // New creates a new user with generated identifiers and timestamps.
-func New(name, email, passwordHash string) (*User, error) {
+func New(name, email string) (*User, error) {
 	name = strings.TrimSpace(name)
 	email = strings.TrimSpace(strings.ToLower(email))
 
@@ -39,46 +38,15 @@ func New(name, email, passwordHash string) (*User, error) {
 	if err := validateEmail(email); err != nil {
 		return nil, err
 	}
-	if passwordHash == "" {
-		return nil, errors.New("user: password hash is required")
-	}
-
 	now := time.Now().UTC()
 
 	return &User{
-		ID:           uuid.New(),
-		Name:         name,
-		Email:        email,
-		PasswordHash: passwordHash,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:        uuid.New(),
+		Name:      name,
+		Email:     email,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}, nil
-}
-
-// UpdateName updates the user's display name.
-func (u *User) UpdateName(name string) error {
-	name = strings.TrimSpace(name)
-	if err := validateName(name); err != nil {
-		return err
-	}
-	u.Name = name
-	u.touch()
-	return nil
-}
-
-// UpdateEmail updates the user's email address.
-func (u *User) UpdateEmail(email string) error {
-	email = strings.TrimSpace(strings.ToLower(email))
-	if err := validateEmail(email); err != nil {
-		return err
-	}
-	u.Email = email
-	u.touch()
-	return nil
-}
-
-func (u *User) touch() {
-	u.UpdatedAt = time.Now().UTC()
 }
 
 func validateName(name string) error {

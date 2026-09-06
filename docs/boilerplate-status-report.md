@@ -18,7 +18,7 @@ This repository is a Go 1.22 Fiber API boilerplate using clean architecture boun
 - Documentation for configuration, architecture, observability, quickstart, and OpenAPI.
 - Makefile automation for build, test, format, lint, and migrations.
 
-The boilerplate is suitable as a production-oriented starting point, but it is not a finished product. It includes a local Keycloak provider; teams still need to configure their production OIDC provider, add production-grade migration tooling, tighten CORS, and add app-specific authorization rules.
+The boilerplate is suitable as a production-oriented starting point, but it is not a finished product. It includes a local Keycloak provider and owner-only user reads; teams still need to configure production Keycloak, add production-grade migration tooling, tighten CORS, and define authorization for future domain actions.
 
 ## Current Architecture
 
@@ -72,8 +72,8 @@ Implemented flow:
 
 4. Protected routes
    - Local API JWTs are verified by route-level middleware.
-   - `GET /api/v1/users/:id` is protected when `APP_JWT_MIDDLEWARE_ENABLED=true`.
-   - `POST /api/v1/users`, `/healthz`, and all `/api/v1/auth/*` endpoints remain public at the JWT-middleware layer.
+   - `GET /api/v1/users/:id` is owner-only when `APP_JWT_MIDDLEWARE_ENABLED=true`; another user's token receives 403 before lookup.
+   - `/healthz` and all `/api/v1/auth/*` endpoints remain public at the JWT-middleware layer.
 
 Important design choices:
 
@@ -81,9 +81,9 @@ Important design choices:
 - State and nonce are used for callback protection.
 - Provider identity uses issuer/provider plus subject, not email alone.
 - First successful OIDC login auto-provisions a local user if the provider returns a verified email.
+- Keycloak is the only account and credential store; local users contain no password hash.
 - The API issues short-lived local Bearer access tokens.
 - Opaque refresh tokens are hashed at rest, rotated, and bounded by a fixed expiry.
-- Password registration remains available.
 
 Core auth files:
 
@@ -128,9 +128,10 @@ go run ./cmd/api
 curl http://localhost:8080/healthz
 ```
 
-## How To Enable OIDC
+## How To Enable Keycloak OIDC
 
-Register an OIDC client in a provider such as Keycloak, Auth0, Okta, Google, or another compliant provider.
+Register an OIDC client in Keycloak. This boilerplate deliberately supports one trusted
+issuer because verified-email linking has no multi-provider confirmation flow.
 
 Set:
 
@@ -224,6 +225,8 @@ Current migration files:
 - `db/migrations/002_create_users.down.sql`
 - `db/migrations/003_create_auth_sessions.up.sql`
 - `db/migrations/003_create_auth_sessions.down.sql`
+- `db/migrations/004_remove_user_password_hash.up.sql`
+- `db/migrations/004_remove_user_password_hash.down.sql`
 
 Important caveat: the migration area exists, and the Makefile has migration commands, but the actual `cmd/tools/migrate` command referenced by the Makefile is not present yet. A team should add or wire a real migration runner before relying on migrations in production deployments.
 
@@ -284,7 +287,9 @@ Access tokens are not immediately revocable and remain valid until their short e
 Refresh-session history is removed opportunistically on successful login; move cleanup to
 a scheduled database job only if login-path cleanup becomes measurable at production scale.
 
-Authorization is minimal. The API authenticates users but does not yet enforce ownership checks, roles, permissions, organizations, or scopes. For example, a valid token can reach the protected user-read route; the handler does not yet verify that the requester may read that specific user.
+Authorization is intentionally minimal. The current protected user-read route enforces
+self-ownership, but there are no roles, permissions, organizations, or scopes for future
+domain actions yet.
 
 Migration tooling is incomplete. Migration files exist, but the Makefile references `go run ./cmd/tools/migrate`, and that command is not currently in the repository.
 
@@ -298,10 +303,11 @@ The SQL migration is intentionally generic. Teams may need database-specific imp
 
 Mongo indexes are created lazily by the auth repository. This is convenient for development, but production teams may prefer index creation as an explicit deployment step.
 
-The password registration path still exists alongside OIDC. That is useful for flexibility, but a real product should decide whether password login is supported, disabled, or moved behind a feature flag.
+Authentication is Keycloak-only. Self-registration is disabled in the bundled realm;
+accounts are created by an administrator, import, or identity federation. Local user rows
+are application profiles, not credential records.
 
-Auth endpoints have a configurable per-IP rate limit. Public user registration is not
-rate-limited yet and should be protected before internet exposure.
+Auth endpoints have a configurable per-IP rate limit.
 
 No CSRF policy is needed for Bearer-only API usage, but if the project later moves tokens into cookies, CSRF protection must be added.
 
@@ -314,12 +320,10 @@ Observability is basic. Request logs and Zerolog are present, but there are no d
 For production readiness:
 
 1. Add a real migration runner under `cmd/tools/migrate` or replace Makefile migration commands with the team's migration tool.
-2. Add authorization checks for protected domain actions.
-3. Configure strict CORS for production.
-4. Add rate limiting for public user registration.
-5. Add structured audit logs for login success, login failure, identity link, and suspicious callback failures.
-6. Add SQL foreign keys and database-specific migration variants if the production database is known.
-7. Move expired-session cleanup to a scheduled database job if session volume makes opportunistic cleanup too slow.
+2. Configure strict CORS for production.
+3. Add structured audit logs for login success, login failure, identity link, and suspicious callback failures.
+4. Add SQL foreign keys and database-specific migration variants if the production database is known.
+5. Move expired-session cleanup to a scheduled database job if session volume makes opportunistic cleanup too slow.
 
 ## Junior Engineer Guide
 
@@ -361,5 +365,5 @@ When changing persistence, update:
 
 This boilerplate is in a healthy state for a starter project. It has a clean structure,
 practical defaults, a working example domain, and a Keycloak-backed local OIDC flow. The
-remaining work is deployment-specific: migrations, authorization policy, strict CORS,
-registration rate limiting, and operational observability.
+remaining work is deployment-specific: migrations, future domain policies, strict CORS,
+and operational observability.

@@ -37,31 +37,6 @@ func (r *MongoRepository) Create(ctx context.Context, user *entity.User) error {
 	return err
 }
 
-// Update replaces fields for an existing user.
-func (r *MongoRepository) Update(ctx context.Context, user *entity.User) error {
-	filter := bson.M{"_id": user.ID.String()}
-	update := bson.M{
-		"$set": bson.M{
-			"name":          user.Name,
-			"email":         user.Email,
-			"password_hash": user.PasswordHash,
-			"updated_at":    user.UpdatedAt,
-		},
-	}
-
-	result, err := r.collection.UpdateOne(ctx, filter, update)
-	if err != nil {
-		if isDuplicate(err) {
-			return repository.ErrEmailExists
-		}
-		return err
-	}
-	if result.MatchedCount == 0 {
-		return repository.ErrNotFound
-	}
-	return nil
-}
-
 // FindByID retrieves a user by identifier.
 func (r *MongoRepository) FindByID(ctx context.Context, id uuid.UUID) (*entity.User, error) {
 	filter := bson.M{"_id": id.String()}
@@ -88,48 +63,32 @@ func (r *MongoRepository) FindByEmail(ctx context.Context, email string) (*entit
 	return doc.toEntity(), nil
 }
 
-// Delete removes a user document.
-func (r *MongoRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	filter := bson.M{"_id": id.String()}
-	result, err := r.collection.DeleteOne(ctx, filter)
-	if err != nil {
-		return err
-	}
-	if result.DeletedCount == 0 {
-		return repository.ErrNotFound
-	}
-	return nil
-}
-
 type mongoUser struct {
-	ID           string    `bson:"_id"`
-	Name         string    `bson:"name"`
-	Email        string    `bson:"email"`
-	PasswordHash string    `bson:"password_hash"`
-	CreatedAt    time.Time `bson:"created_at"`
-	UpdatedAt    time.Time `bson:"updated_at"`
+	ID        string    `bson:"_id"`
+	Name      string    `bson:"name"`
+	Email     string    `bson:"email"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
 }
 
 func mongoUserFromEntity(u *entity.User) mongoUser {
 	return mongoUser{
-		ID:           u.ID.String(),
-		Name:         u.Name,
-		Email:        u.Email,
-		PasswordHash: u.PasswordHash,
-		CreatedAt:    u.CreatedAt,
-		UpdatedAt:    u.UpdatedAt,
+		ID:        u.ID.String(),
+		Name:      u.Name,
+		Email:     u.Email,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
 	}
 }
 
 func (u mongoUser) toEntity() *entity.User {
 	id, _ := uuid.Parse(u.ID)
 	return &entity.User{
-		ID:           id,
-		Name:         u.Name,
-		Email:        u.Email,
-		PasswordHash: u.PasswordHash,
-		CreatedAt:    u.CreatedAt,
-		UpdatedAt:    u.UpdatedAt,
+		ID:        id,
+		Name:      u.Name,
+		Email:     u.Email,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"golang.org/x/crypto/bcrypt"
 
 	authentity "github.com/casper/go-fiber-clean-arch/internal/auth/entity"
 	authrepo "github.com/casper/go-fiber-clean-arch/internal/auth/repository"
@@ -406,9 +405,8 @@ func (s *Service) resolveProvisionedUser(ctx context.Context, token *ProviderTok
 		return nil, ErrEmailRequired
 	}
 
-	// ponytail: links to an existing local user purely on verified email. Safe with one
-	// trusted issuer; add a linking-confirmation step before adding a second IdP or a
-	// password login, otherwise a pre-registered email row becomes a takeover vector.
+	// ponytail: verified-email linking migrates users created before Keycloak-only.
+	// Add explicit linking confirmation before trusting a second issuer.
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err == nil {
 		return existing, nil
@@ -417,11 +415,7 @@ func (s *Service) resolveProvisionedUser(ctx context.Context, token *ProviderTok
 		return nil, err
 	}
 
-	passwordHash, err := externalPasswordHash()
-	if err != nil {
-		return nil, err
-	}
-	user, err := userentity.New(displayName(token.Name, email), email, passwordHash)
+	user, err := userentity.New(displayName(token.Name, email), email)
 	if err != nil {
 		return nil, err
 	}
@@ -433,18 +427,6 @@ func (s *Service) resolveProvisionedUser(ctx context.Context, token *ProviderTok
 	}
 
 	return user, nil
-}
-
-func externalPasswordHash() (string, error) {
-	raw, err := randomURLToken()
-	if err != nil {
-		return "", err
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(raw), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
 }
 
 func displayName(name, email string) string {

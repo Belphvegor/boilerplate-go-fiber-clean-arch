@@ -5,9 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 
-	"github.com/casper/go-fiber-clean-arch/internal/shared/validator"
 	"github.com/casper/go-fiber-clean-arch/internal/user/entity"
 	"github.com/casper/go-fiber-clean-arch/internal/user/usecase"
 	"github.com/casper/go-fiber-clean-arch/pkg/response"
@@ -15,55 +13,30 @@ import (
 
 // Handler exposes HTTP endpoints for the User domain.
 type Handler struct {
-	service   *usecase.Service
-	validator *validator.Adapter
-	logger    zerolog.Logger
+	service *usecase.Service
 }
 
 // NewHandler creates a Handler.
-func NewHandler(service *usecase.Service, validator *validator.Adapter, logger zerolog.Logger) *Handler {
-	return &Handler{
-		service:   service,
-		validator: validator,
-		logger:    logger,
-	}
+func NewHandler(service *usecase.Service) *Handler {
+	return &Handler{service: service}
 }
 
 // Register adds user routes to the router.
 func (h *Handler) Register(router fiber.Router, protected ...fiber.Handler) {
-	router.Post("/users", h.createUser)
 	getHandlers := append(protected, h.getUser)
 	router.Get("/users/:id", getHandlers...)
 }
 
-func (h *Handler) createUser(ctx *fiber.Ctx) error {
-	var req CreateUserRequest
-	if err := ctx.BodyParser(&req); err != nil {
-		return response.Error(ctx, fiber.StatusBadRequest, "invalid payload", err.Error())
-	}
-
-	if err := h.validator.Struct(req); err != nil {
-		return response.Error(ctx, fiber.StatusUnprocessableEntity, "validation failed", err)
-	}
-
-	user, err := h.service.Register(ctx.Context(), usecase.CreateInput{
-		Name:     req.Name,
-		Email:    req.Email,
-		Password: req.Password,
-	})
+func ownerOnly(ctx *fiber.Ctx) error {
+	targetID, err := uuid.Parse(ctx.Params("id"))
 	if err != nil {
-		status := fiber.StatusInternalServerError
-		var validationErr *validator.Error
-		switch {
-		case errors.Is(err, usecase.ErrEmailExists):
-			status = fiber.StatusConflict
-		case errors.As(err, &validationErr):
-			status = fiber.StatusUnprocessableEntity
-		}
-		return response.Error(ctx, status, "could not create user", err.Error())
+		return ctx.Next()
 	}
-
-	return response.Success(ctx, fiber.StatusCreated, toResponse(user))
+	actorID, ok := ctx.Locals("auth.user_id").(string)
+	if !ok || actorID != targetID.String() {
+		return response.Error(ctx, fiber.StatusForbidden, "forbidden", nil)
+	}
+	return ctx.Next()
 }
 
 func (h *Handler) getUser(ctx *fiber.Ctx) error {

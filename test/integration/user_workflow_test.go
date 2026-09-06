@@ -1,7 +1,6 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -11,12 +10,13 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/casper/go-fiber-clean-arch/config"
 	"github.com/casper/go-fiber-clean-arch/internal/bootstrap"
 	userhttp "github.com/casper/go-fiber-clean-arch/internal/user/delivery/http"
+	userentity "github.com/casper/go-fiber-clean-arch/internal/user/entity"
+	userpersistence "github.com/casper/go-fiber-clean-arch/internal/user/infrastructure/persistence"
 	"github.com/casper/go-fiber-clean-arch/pkg/middleware"
 )
 
@@ -41,30 +41,21 @@ func TestUserWorkflow(t *testing.T) {
 	app := fiber.New()
 	middleware.Register(app, cfg, container.Logger)
 	require.NoError(t, container.RegisterRoutes(app, userhttp.Register))
+	require.NotNil(t, container.DB.SQL, "TestUserWorkflow requires a SQL database")
 
-	payload := map[string]string{
-		"name":     "Integration User",
-		"email":    "integration@example.com",
-		"password": "StrongPass123",
-	}
-	body, _ := json.Marshal(payload)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := app.Test(req)
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/api/v1/users", nil))
 	require.NoError(t, err)
-	require.Equal(t, fiber.StatusCreated, resp.StatusCode)
+	require.Equal(t, fiber.StatusNotFound, resp.StatusCode)
 
-	var createResp struct {
-		Data userhttp.UserResponse `json:"data"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&createResp))
-	require.NotEmpty(t, createResp.Data.ID)
+	user, err := userentity.New("Integration User", "integration-"+time.Now().Format("20060102150405.000000000")+"@example.com")
+	require.NoError(t, err)
+	require.NoError(t, userpersistence.NewSQLRepository(container.DB.SQL).Create(ctx, user))
+	t.Cleanup(func() {
+		query := container.DB.SQL.Rebind("DELETE FROM users WHERE id = ?")
+		_, _ = container.DB.SQL.ExecContext(context.Background(), query, user.ID)
+	})
 
-	userID := createResp.Data.ID
-
-	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/users/"+userID, nil)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/users/"+user.ID.String(), nil)
 
 	respGet, err := app.Test(reqGet)
 	require.NoError(t, err)
@@ -74,11 +65,5 @@ func TestUserWorkflow(t *testing.T) {
 		Data userhttp.UserResponse `json:"data"`
 	}
 	require.NoError(t, json.NewDecoder(respGet.Body).Decode(&getResp))
-	require.Equal(t, createResp.Data.Email, getResp.Data.Email)
-
-	if container.DB.SQL != nil {
-		rebind := container.DB.SQL.Rebind
-		query := rebind("DELETE FROM users WHERE id = ?")
-		_, _ = container.DB.SQL.ExecContext(context.Background(), query, uuid.MustParse(userID))
-	}
+	require.Equal(t, user.Email, getResp.Data.Email)
 }

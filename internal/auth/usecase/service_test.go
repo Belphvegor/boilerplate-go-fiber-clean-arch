@@ -477,12 +477,6 @@ func (r *memoryUserRepo) Create(ctx context.Context, user *userentity.User) erro
 	return nil
 }
 
-func (r *memoryUserRepo) Update(ctx context.Context, user *userentity.User) error {
-	r.byID[user.ID] = user
-	r.byEmail[user.Email] = user
-	return nil
-}
-
 func (r *memoryUserRepo) FindByID(ctx context.Context, id uuid.UUID) (*userentity.User, error) {
 	user, ok := r.byID[id]
 	if !ok {
@@ -497,14 +491,4 @@ func (r *memoryUserRepo) FindByEmail(ctx context.Context, email string) (*useren
 		return nil, userrepo.ErrNotFound
 	}
 	return user, nil
-}
-
-func (r *memoryUserRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	user, ok := r.byID[id]
-	if !ok {
-		return userrepo.ErrNotFound
-	}
-	delete(r.byID, id)
-	delete(r.byEmail, user.Email)
-	return nil
 }

@@ -7,7 +7,7 @@ A production-ready Go starter leveraging [Fiber](https://gofiber.io) with clean 
 - Clean architecture layering with explicit boundaries between delivery, use cases, entities, and infrastructure.
 - Environment-driven configuration with fail-fast validation for PostgreSQL, MySQL, or MongoDB backends.
 - Structured logging via Zerolog and configurable Fiber middleware (request logging, CORS, recovery, JWT).
-- Example `User` bounded context demonstrating repository interfaces, SQL & Mongo adapters, and HTTP handlers.
+- Read-only local `User` profile projection provisioned by Keycloak login, with SQL and Mongo adapters.
 - Docker Compose environment for local development and integration tests.
 - Comprehensive documentation under `docs/` including architecture overview, folder reference, configuration matrix, and quickstart workflow.
 

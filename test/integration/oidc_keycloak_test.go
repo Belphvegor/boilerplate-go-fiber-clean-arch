@@ -18,6 +18,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -131,6 +132,16 @@ func TestKeycloakLoginFlow(t *testing.T) {
 		require.NoError(t, err)
 		defer unauth.Body.Close()
 		assert.Equal(t, http.StatusUnauthorized, unauth.StatusCode)
+
+		// Authentication is not authorization: Ada's token cannot read another
+		// user's object, even when the target UUID is valid.
+		otherReq, err := http.NewRequest(http.MethodGet, appBaseURL+"/api/v1/users/"+uuid.NewString(), nil)
+		require.NoError(t, err)
+		otherReq.Header.Set("Authorization", "Bearer "+data.AccessToken)
+		otherResp, err := http.DefaultClient.Do(otherReq)
+		require.NoError(t, err)
+		defer otherResp.Body.Close()
+		assert.Equal(t, http.StatusForbidden, otherResp.StatusCode)
 	})
 
 	t.Run("second login reuses the same local user", func(t *testing.T) {

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Clean Architecture Fiber Starter API
-  version: 0.1.0
-  description: Sample User domain demonstrating clean architecture layering.
+  version: 0.2.0
+  description: Keycloak-only authentication with a local user profile projection.
 servers:
   - url: http://localhost:8080/api/v1
 paths:
@@ -25,7 +25,7 @@ paths:
   /auth/callback:
     get:
       summary: Complete OIDC login
-      description: Validates the provider callback and returns a local access/refresh token pair.
+      description: Validates the provider callback, provisions the local profile when needed, and returns a local access/refresh token pair.
       operationId: completeOIDCLogin
       parameters:
         - name: code
@@ -146,48 +146,10 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       tags:
         - Auth
-  /users:
-    post:
-      summary: Register user
-      description: Creates a new user and returns the public profile.
-      operationId: registerUser
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateUserRequest'
-      responses:
-        '201':
-          description: User created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        '400':
-          description: Invalid payload
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Validation failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      tags:
-        - Users
   /users/{id}:
     get:
       summary: Fetch user by ID
-      description: Retrieves a user profile by identifier. Requires authentication.
+      description: Retrieves the authenticated user's own profile. Other user IDs are forbidden.
       operationId: getUserById
       security:
         - bearerAuth: []
@@ -206,8 +168,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Invalid user ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Authenticated user does not own this profile
           content:
             application/json:
               schema:
@@ -233,23 +207,6 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
-    CreateUserRequest:
-      type: object
-      required:
-        - name
-        - email
-        - password
-      properties:
-        name:
-          type: string
-          minLength: 2
-          maxLength: 100
-        email:
-          type: string
-          format: email
-        password:
-          type: string
-          minLength: 8
     UserResponse:
       type: object
       properties:

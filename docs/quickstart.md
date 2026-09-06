@@ -59,6 +59,16 @@ MIGRATION_CMD="migrate -path=/migrations -database postgres://app:app@database:5
 ```
 
 The migrator mounts `db/migrations`. Change the database URL when using another driver.
+Migration `004` permanently removes local password hashes. For an existing deployment,
+stop the old API before applying it and deploy the new binary immediately afterward.
+
+MongoDB has no migration runner in this starter. Remove the legacy field once during
+the same maintenance window:
+
+```bash
+mongosh "$APP_MONGO_URI/$APP_MONGO_DATABASE" \
+  --eval 'db.users.updateMany({}, {$unset: {password_hash: ""}})'
+```
 
 ## 6. Start the API
 
@@ -91,16 +101,13 @@ curl http://localhost:8080/api/v1/users/<user-id> \
   -H "Authorization: Bearer <access-token>"
 ```
 
-For the public registration endpoint instead:
+The callback's `user.id` is the local domain ID used by `GET /api/v1/users/{id}`.
+The local profile is created automatically on the first successful login.
 
-```bash
-curl -X POST http://localhost:${APP_HTTP_PORT}/api/v1/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Ada Lovelace","email":"ada@example.com","password":"Str0ngPass!"}'
-```
-
-Use the returned `id` when calling `GET /api/v1/users/{id}`; it still requires a valid
-local JWT when middleware protection is enabled.
+Public self-registration is disabled. To add a development user, open the Keycloak
+Admin Console at <http://localhost:8081>, select realm `clean-arch`, create an enabled
+user, mark the email verified, and set its credential there. The API never receives or
+stores that password.
 
 ## 8. Run Tests
 
@@ -144,10 +151,10 @@ If you started profile-specific services, include `--profile` flags when shuttin
 
 | Step | Expected Result | Status |
 |------|-----------------|--------|
-| `POST /api/v1/users` with sample payload | `201 Created` and response body with user ID | Pending (execute after local setup) |
+| `POST /api/v1/users` | `404 Not Found`; password signup does not exist | Pending |
 | `GET /api/v1/users/{id}` | `200 OK` with user payload | Pending |
 | `GET /healthz` | `200 OK` JSON `{ "status": "ok" }` | Pending |
-| Keycloak login as `ada` | Callback returns access and refresh tokens | Pending |
+| Keycloak login as `ada` | Callback returns tokens and auto-provisions the local profile | Pending |
 | Keycloak login as `grace` | Callback returns `401` because email is unverified | Pending |
 
 Happy building!

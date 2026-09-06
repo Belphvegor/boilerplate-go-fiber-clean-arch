@@ -50,6 +50,13 @@ For production:
 - Keep `APP_JWT_MIDDLEWARE_ENABLED=true` so protected routes require the local Bearer token.
 - Keep the default scopes unless the provider requires additional values; auto-provisioning needs a verified email claim.
 
+### Object-level authorization
+
+When JWT middleware is enabled, `GET /api/v1/users/{id}` is owner-only. The JWT `sub`
+must be a valid local user UUID and must equal the path ID. Missing or invalid tokens
+return 401; a valid token targeting another user returns 403 before any database lookup.
+Disabling `APP_JWT_MIDDLEWARE_ENABLED` also disables this guard for local prototyping.
+
 ### Sessions, refresh, and logout
 
 Login returns a pair: a short-lived access token and an opaque refresh token.
@@ -115,12 +122,19 @@ port 8081 and imports `deploy/keycloak/realm-clean-arch.json`, which defines:
 | Client | `clean-arch-api`, confidential, secret `clean-arch-dev-secret` |
 | PKCE | Required (`pkce.code.challenge.method: S256` client attribute) |
 | Redirect URI | `http://localhost:8080/api/v1/auth/callback` (exact match, no wildcard) |
+| Self-registration | Disabled; accounts are admin-managed |
 | Admin console | <http://localhost:8081> — `admin` / `admin` |
 | Test user | `ada` / `ada` — email verified, logs in successfully |
 | Test user | `grace` / `grace` — email **not** verified, rejected with 401 |
 
 Copy the OIDC block from `.env.example` into `.env`, set `APP_OIDC_ENABLED=true`, run the
 migrations, then start the API and open <http://localhost:8080/api/v1/auth/login>.
+
+Keycloak is the only credential store. Create accounts through its Admin Console, import,
+or identity federation; enable each account and mark its email verified. The first valid
+OIDC login provisions a local `users` row containing only the application ID, name, email,
+and timestamps. The application has no password registration endpoint and does not use the
+Keycloak Admin API.
 
 Verify the whole flow, including the ID token signature, PKCE, and the JWT-guarded route:
 
@@ -147,7 +161,9 @@ Things that break a Keycloak setup, in the order they usually bite:
   realm issues new subjects and provisions new local users.
 
 For production, replace dev mode with `start`, a real database, TLS, and a rotated client
-secret; the committed realm file is a development fixture, not a deployment artifact.
+secret; the committed realm and its weak fixture credentials are development-only.
+Keep Authorization Code + PKCE enabled and Direct Access Grants disabled. These settings
+follow the official Keycloak 26.4 Server Administration and OIDC grant documentation.
 
 ## Switching Databases
 
@@ -176,7 +192,11 @@ secret; the committed realm file is a development fixture, not a deployment arti
    docker compose --profile mongo up -d mongo
    ```
 
-3. Run migrations or seed scripts matching the selected backend.
+3. Run migrations or seed scripts matching the selected backend. SQL migration `004`
+   removes `users.password_hash` permanently. For an existing Mongo database, run once:
+   ```javascript
+   db.users.updateMany({}, {$unset: {password_hash: ""}})
+   ```
 
 4. Restart the API process to apply changes. No code modifications are required—the database factory resolves the correct repository based on `APP_DATABASE_DRIVER`.
 

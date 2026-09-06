@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/rs/zerolog"
 
 	"github.com/casper/go-fiber-clean-arch/internal/bootstrap"
 	"github.com/casper/go-fiber-clean-arch/internal/user/infrastructure/persistence"
@@ -20,12 +19,12 @@ func Register(app *fiber.App, container *bootstrap.Container) error {
 		return err
 	}
 
-	svc := usecase.NewService(repo, container.Validator, childLogger(container.Logger))
-	handler := NewHandler(svc, container.Validator, childLogger(container.Logger))
+	svc := usecase.NewService(repo)
+	handler := NewHandler(svc)
 
 	api := app.Group("/api/v1")
 	if container.Config.Middleware.JWT {
-		handler.Register(api, middleware.JWTProtected(container.Config.JWT))
+		handler.Register(api, middleware.JWTProtected(container.Config.JWT), ownerOnly)
 	} else {
 		handler.Register(api)
 	}
@@ -49,8 +48,4 @@ func buildRepository(container *bootstrap.Container) (repository.Repository, err
 	default:
 		return nil, fmt.Errorf("user: unsupported driver %s", driver)
 	}
-}
-
-func childLogger(base zerolog.Logger) zerolog.Logger {
-	return base.With().Str("module", "user").Logger()
 }

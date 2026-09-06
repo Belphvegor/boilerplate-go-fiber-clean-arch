@@ -11,6 +11,7 @@ import (
 	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	fiberRecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/casper/go-fiber-clean-arch/config"
@@ -73,9 +74,14 @@ func JWTProtected(cfg config.JWTConfig) fiber.Handler {
 			}
 			return jwtErrorHandler(ctx, err)
 		}
+		subject, claimErr := claims.GetSubject()
+		userID, parseErr := uuid.Parse(subject)
+		if claimErr != nil || parseErr != nil {
+			return jwtErrorHandler(ctx, errors.New("invalid subject claim"))
+		}
 
 		ctx.Locals("auth.claims", claims)
-		ctx.Locals("auth.user_id", claims["sub"])
+		ctx.Locals("auth.user_id", userID.String())
 		return ctx.Next()
 	}
 }

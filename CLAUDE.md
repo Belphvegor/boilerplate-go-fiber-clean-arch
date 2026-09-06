@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 go run ./cmd/api                          # Start the Fiber HTTP server
 go test ./...                             # Run all tests
 go test ./internal/user/usecase           # Run a single package's tests
-go test -run TestService_Register_Success ./internal/user/usecase   # Run a single test
+go test -run TestService_Get ./internal/user/usecase        # Run a single test
 INTEGRATION=true go test ./test/integration   # Integration tests (skipped without this env var; needs a live DB)
 make -C scripts build                     # go build ./...
 make -C scripts fmt                       # gofmt -w over cmd/ config/ internal/ pkg/ test/
@@ -37,11 +37,11 @@ Fiber global middleware (recovery, request logger, CORS) → route group `/api/v
 | Persistence | `internal/<domain>/infrastructure/persistence/` | SQL (`sqlx`) and MongoDB implementations of the repository interface |
 | Delivery | `internal/<domain>/delivery/http/` | Fiber handlers, DTOs, route registration (`routes.go`) |
 
-Sentinel errors are re-exported upward (`usecase.ErrEmailExists = repository.ErrEmailExists`) so handlers map them to HTTP status with `errors.Is`. Validation failures surface as `*validator.Error` (field → message map) and map to 422.
+Sentinel repository errors may be re-exported upward so handlers can map them to HTTP status with `errors.Is`. Validation failures surface as `*validator.Error` (field → message map) and map to 422.
 
 ### The two domains
 
-- **`internal/user`** — CRUD reference module. `/api/v1/users`, JWT-guarded when `APP_JWT_MIDDLEWARE_ENABLED=true`.
+- **`internal/user`** — read-only local profile projection. Keycloak login creates it on first use; `GET /api/v1/users/:id` is JWT-guarded and owner-only when `APP_JWT_MIDDLEWARE_ENABLED=true`.
 - **`internal/auth`** — OAuth2/OIDC login, refresh, and logout. `GET /api/v1/auth/login` redirects with state+nonce+PKCE, `GET /api/v1/auth/callback` verifies the provider response and returns a local access/refresh pair, `POST /api/v1/auth/refresh` rotates the refresh token, and `POST /api/v1/auth/logout` revokes its family. When `APP_OIDC_ENABLED=false`, `DisabledHandler` registers the same four paths returning 503.
 
 Auth depends on the user module's repository (cross-domain wiring lives in `internal/auth/delivery/http/routes.go`, not in the use case).
@@ -57,7 +57,7 @@ Auth depends on the user module's repository (cross-domain wiring lives in `inte
 
 Two halves, don't confuse them:
 - `internal/auth/usecase/token.go` **issues** tokens (HS256, `sub`/`iss`/`aud`/`exp` + email/name/provider claims).
-- `pkg/middleware.JWTProtected(cfg.JWT)` **verifies** them and stashes `auth.claims` / `auth.user_id` in `ctx.Locals`. It is applied per route group by the module, not globally — `/healthz` and the auth endpoints stay reachable without a token.
+- `pkg/middleware.JWTProtected(cfg.JWT)` **verifies** them, requires a UUID `sub`, and stashes `auth.claims` / canonical `auth.user_id` in `ctx.Locals`. It is applied per route group by the module, not globally — `/healthz` and the auth endpoints stay reachable without a token.
 
 ### Adding a new domain
 
@@ -93,11 +93,11 @@ These are unfinished parts of the starter, not bugs to be surprised by. `docs/bo
 - **No `cmd/tools/migrate`.** `make -C scripts migrate-*` fails. Use the compose profile instead:
   `MIGRATION_CMD="migrate -path=/migrations -database postgres://app:app@database:5432/app?sslmode=disable up" docker compose --profile migrate run --rm migrator`
 - **No `specs/`** despite README/AGENTS.md contribution steps referencing it.
-- **No password login.** `usecase.Service.Register` stores a bcrypt hash that nothing verifies. Tokens come only from the OIDC flow, so either run Keycloak (below) or set `APP_JWT_MIDDLEWARE_ENABLED=false`.
-- **No authorization rules** beyond "valid token" — a route sees `auth.user_id` and nothing else.
+- **Keycloak-only authentication.** Accounts and passwords live in Keycloak. The application exposes no password registration/login endpoint and stores no password hash; `APP_JWT_MIDDLEWARE_ENABLED=false` remains a local testing escape hatch only.
+- **Authorization is self-only.** `GET /api/v1/users/:id` compares the UUID path parameter with `auth.user_id` and returns 403 before lookup for another user. There is no role/admin bypass or policy engine.
 - **Access tokens are not revocable.** Refresh tokens rotate and can be revoked, but an issued access token stays valid until `exp`, so revocation latency equals `APP_JWT_ACCESS_TTL`. Every token now carries a `jti`, which is what a denylist would key on if one is ever added.
 - **Session cleanup runs on successful login.** `auth_sessions` keeps spent rows until the fixed family expiry for replay detection, then opportunistically deletes them. Move cleanup to a periodic database job only if login-path cleanup becomes measurable at production scale.
-- **Email-based account linking is unconditional.** `resolveProvisionedUser` attaches an OIDC login to any existing local user with the same verified email. Safe with one trusted issuer, but it becomes a takeover path once a second IdP or password login exists, because `POST /api/v1/users` accepts arbitrary emails. Marked with a `ponytail:` comment in `internal/auth/usecase/service.go`.
+- **Verified-email linking assumes one issuer.** `resolveProvisionedUser` can attach the first Keycloak login to a pre-existing local row with the same verified email. Add explicit linking confirmation before trusting a second identity provider.
 - **No FK from `auth_identities.user_id` to `users.id`.** Migration order puts identities first, and the `ALTER`/`DROP` syntax differs between Postgres and MySQL, which would break the one-adapter-serves-both convention. Orphan identities are possible.
 
 ## Sessions
