@@ -2,11 +2,11 @@
 
 This document is a handover report for engineers who need to understand, run, extend, or audit this Go Fiber clean architecture boilerplate.
 
-Last updated: 2026-05-02
+Last updated: 2026-10-24
 
 ## Executive Summary
 
-This repository is a Go 1.22 Fiber API boilerplate using clean architecture boundaries. It currently includes:
+This repository is a Go 1.27 Fiber API boilerplate using clean architecture boundaries. It currently includes:
 
 - A working HTTP API entrypoint in `cmd/api`.
 - Environment-driven configuration in `config`.
@@ -18,7 +18,7 @@ This repository is a Go 1.22 Fiber API boilerplate using clean architecture boun
 - Documentation for configuration, architecture, observability, quickstart, and OpenAPI.
 - Makefile automation for build, test, format, lint, and migrations.
 
-The boilerplate is suitable as a production-oriented starting point, but it is not a finished product. It includes a local Keycloak provider and owner-only user reads; teams still need to configure production Keycloak, add production-grade migration tooling, tighten CORS, and define authorization for future domain actions.
+The boilerplate is suitable as a production-oriented starting point, but it is not a finished product. It includes a local Keycloak provider and owner-only user reads; teams still need to configure production Keycloak, tighten CORS, and define authorization for future domain actions.
 
 ## Current Architecture
 
@@ -228,7 +228,7 @@ Current migration files:
 - `db/migrations/004_remove_user_password_hash.up.sql`
 - `db/migrations/004_remove_user_password_hash.down.sql`
 
-Important caveat: the migration area exists, and the Makefile has migration commands, but the actual `cmd/tools/migrate` command referenced by the Makefile is not present yet. A team should add or wire a real migration runner before relying on migrations in production deployments.
+Migrations run with `make -C scripts migrate-up` / `migrate-down` (one step) / `migrate-status`, which wrap golang-migrate in the compose `migrator` service. Override `MIGRATE_DATABASE_URL` to target another database; its host must be reachable from that container.
 
 ## Testing And Verification
 
@@ -291,7 +291,7 @@ Authorization is intentionally minimal. The current protected user-read route en
 self-ownership, but there are no roles, permissions, organizations, or scopes for future
 domain actions yet.
 
-Migration tooling is incomplete. Migration files exist, but the Makefile references `go run ./cmd/tools/migrate`, and that command is not currently in the repository.
+Migrations need Docker: the Make targets run the `migrate/migrate` image rather than a host binary. MongoDB has no migration runner.
 
 CORS uses Fiber's default permissive middleware when enabled. Production deployments should configure allowed origins, methods, and headers explicitly.
 
@@ -319,11 +319,10 @@ Observability is basic. Request logs and Zerolog are present, but there are no d
 
 For production readiness:
 
-1. Add a real migration runner under `cmd/tools/migrate` or replace Makefile migration commands with the team's migration tool.
-2. Configure strict CORS for production.
-3. Add structured audit logs for login success, login failure, identity link, and suspicious callback failures.
-4. Add SQL foreign keys and database-specific migration variants if the production database is known.
-5. Move expired-session cleanup to a scheduled database job if session volume makes opportunistic cleanup too slow.
+1. Configure strict CORS for production.
+2. Add structured audit logs for login success, login failure, identity link, and suspicious callback failures.
+3. Add SQL foreign keys and database-specific migration variants if the production database is known.
+4. Move expired-session cleanup to a scheduled database job if session volume makes opportunistic cleanup too slow.
 
 ## Junior Engineer Guide
 
@@ -365,5 +364,5 @@ When changing persistence, update:
 
 This boilerplate is in a healthy state for a starter project. It has a clean structure,
 practical defaults, a working example domain, and a Keycloak-backed local OIDC flow. The
-remaining work is deployment-specific: migrations, future domain policies, strict CORS,
+remaining work is deployment-specific: future domain policies, strict CORS,
 and operational observability.

@@ -4,7 +4,7 @@ This guide walks through setting up the Clean Architecture Fiber Starter for loc
 
 ## 1. Prerequisites
 
-- Go 1.22 or newer in your `PATH`
+- Go 1.27 or newer in your `PATH`
 - Docker + Docker Compose
 - GNU Make (optional, for provided automation targets)
 
@@ -54,11 +54,14 @@ docker compose --profile keycloak up -d database keycloak
 For the default PostgreSQL database:
 
 ```bash
-MIGRATION_CMD="migrate -path=/migrations -database postgres://app:app@database:5432/app?sslmode=disable up" \
-  docker compose --profile migrate run --rm migrator
+make -C scripts migrate-up       # apply pending migrations
+make -C scripts migrate-status   # print the current version
+make -C scripts migrate-down     # roll back one migration
 ```
 
-The migrator mounts `db/migrations`. Change the database URL when using another driver.
+The targets run the compose `migrator` service, which mounts `db/migrations`. Point them at
+another database with `MIGRATE_DATABASE_URL`, e.g.
+`make -C scripts migrate-up MIGRATE_DATABASE_URL='mysql://app:app@tcp(mysql:3306)/app'`.
 Migration `004` permanently removes local password hashes. For an existing deployment,
 stop the old API before applying it and deploy the new binary immediately afterward.
 

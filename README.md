@@ -59,7 +59,7 @@ go test ./...                # Run unit tests
 go run ./cmd/api             # Start the Fiber server
 ```
 
-Linting is available through `make -C scripts lint`. The exact local PostgreSQL migration command is documented in [`docs/quickstart.md`](docs/quickstart.md); the `migrate-*` Make targets remain placeholders until the project chooses a host-side migration runner.
+Linting is available through `make -C scripts lint`. Migrations run with `make -C scripts migrate-up` (see [`docs/quickstart.md`](docs/quickstart.md)). `docker build .` produces the API image, and `.github/workflows/ci.yml` runs gofmt, vet, race tests, govulncheck, and the image build on pushes to `master` and on pull requests.
 
 ## Documentation Map
 

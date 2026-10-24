@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # Default PostgreSQL instance (docker compose up -d database)
   database:

@@ -14,6 +14,9 @@ make -C scripts build                     # go build ./...
 make -C scripts fmt                       # gofmt -w over cmd/ config/ internal/ pkg/ test/
 make -C scripts lint                      # golangci-lint, falls back to go vet
 make -C scripts tidy                      # go mod tidy
+make -C scripts migrate-up                # golang-migrate via the compose `migrator`; also migrate-down (1 step), migrate-status
+make -C scripts migrate-up MIGRATE_DATABASE_URL='mysql://app:app@tcp(mysql:3306)/app'   # other target DB
+docker build -t clean-arch-api .          # App image (distroless, nonroot, port 8080)
 docker compose up -d database             # PostgreSQL (default)
 docker compose --profile mysql up -d mysql
 docker compose --profile mongo up -d mongo
@@ -21,7 +24,7 @@ docker compose --profile mongo up -d mongo
 
 ## Architecture
 
-Go 1.22 / Fiber v2, **clean architecture** with dependency inversion. Module path `github.com/casper/go-fiber-clean-arch`.
+Go 1.27 / Fiber v2, **clean architecture** with dependency inversion. Module path `github.com/casper/go-fiber-clean-arch`.
 
 ### Request flow
 
@@ -90,8 +93,7 @@ Env-driven, `APP_` prefix. Viper keys with a dot map to an underscore: `HTTP.POR
 
 These are unfinished parts of the starter, not bugs to be surprised by. `docs/boilerplate-status-report.md` is the longer handover version.
 
-- **No `cmd/tools/migrate`.** `make -C scripts migrate-*` fails. Use the compose profile instead:
-  `MIGRATION_CMD="migrate -path=/migrations -database postgres://app:app@database:5432/app?sslmode=disable up" docker compose --profile migrate run --rm migrator`
+- **Migrations run only through Docker.** `make -C scripts migrate-*` wraps the compose `migrator` (`migrate/migrate` image), so the DB host in `MIGRATE_DATABASE_URL` must be reachable from that container (`database`, `mysql`, or a real host). Mongo has no migration runner.
 - **No `specs/`** despite README/AGENTS.md contribution steps referencing it.
 - **Keycloak-only authentication.** Accounts and passwords live in Keycloak. The application exposes no password registration/login endpoint and stores no password hash; `APP_JWT_MIDDLEWARE_ENABLED=false` remains a local testing escape hatch only.
 - **Authorization is self-only.** `GET /api/v1/users/:id` compares the UUID path parameter with `auth.user_id` and returns 403 before lookup for another user. There is no role/admin bypass or policy engine.

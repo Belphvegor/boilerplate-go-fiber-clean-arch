@@ -12,7 +12,7 @@ The Go application lives under `cmd/api` (entrypoint) and `internal/` (bootstrap
 - `docker compose up -d database` - start backing services for local runs.
 
 ## Coding Style & Naming Conventions
-Target Go 1.22 with idiomatic style. Keep files formatted via `make -C scripts fmt` before every commit. Prefer package-level names that reflect architecture layers (e.g., `userRepository`, `CreateUserUseCase`). Interfaces normally live near their consumers inside `internal/<domain>`, and shared types should only be exported from `pkg/`. Structured logging flows through Zerolog helpers; avoid ad-hoc `fmt.Println`.
+Target Go 1.27 with idiomatic style. Keep files formatted via `make -C scripts fmt` before every commit. Prefer package-level names that reflect architecture layers (e.g., `userRepository`, `CreateUserUseCase`). Interfaces normally live near their consumers inside `internal/<domain>`, and shared types should only be exported from `pkg/`. Structured logging flows through Zerolog helpers; avoid ad-hoc `fmt.Println`.
 
 ## Testing Guidelines
 Author tests first to satisfy the "Tests Before Trust" principle. Store unit tests alongside their packages and use `sqlmock` or containerized databases for persistence coverage. Name integration tests after the user flow they verify (e.g., `TestUserCreateHandler_Success`). Run `go test ./...` before pushing and attach benchmark or load scripts when you touch hot paths.

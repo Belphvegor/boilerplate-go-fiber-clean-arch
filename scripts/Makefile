@@ -2,7 +2,9 @@ SHELL := /bin/bash
 
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
-MIGRATE ?= go run ./cmd/tools/migrate
+# Runs golang-migrate through the compose `migrator` service; the host name is the compose service.
+MIGRATE ?= docker compose --profile migrate run --rm migrator
+MIGRATE_DATABASE_URL ?= postgres://app:app@database:5432/app?sslmode=disable
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
 .PHONY: build run fmt lint test tidy migrate-up migrate-down migrate-status
@@ -38,10 +40,11 @@ tidy:
 	cd $(ROOT_DIR) && $(GO) mod tidy
 
 migrate-up:
-	cd $(ROOT_DIR) && $(MIGRATE) up
+	cd $(ROOT_DIR) && $(MIGRATE) "migrate -path=/migrations -database '$(MIGRATE_DATABASE_URL)' up"
 
+# Rolls back one migration; a bare `down` would revert everything.
 migrate-down:
-	cd $(ROOT_DIR) && $(MIGRATE) down
+	cd $(ROOT_DIR) && $(MIGRATE) "migrate -path=/migrations -database '$(MIGRATE_DATABASE_URL)' down 1"
 
 migrate-status:
-	cd $(ROOT_DIR) && $(MIGRATE) status
+	cd $(ROOT_DIR) && $(MIGRATE) "migrate -path=/migrations -database '$(MIGRATE_DATABASE_URL)' version"

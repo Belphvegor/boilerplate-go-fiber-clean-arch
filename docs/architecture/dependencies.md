@@ -18,7 +18,7 @@ The starter keeps dependencies minimal, focusing on packages that improve develo
 ## Managing Versions
 
 - Versions listed above reflect the state when this starter was generated. Use `go get -u` or `renovate` to automate upgrades.
-- The project targets Go 1.22; ensure CI environments use the same toolchain to avoid module resolution mismatches.
+- The project targets Go 1.27 (the `go` line in `go.mod`). CI reads its Go version from `go.mod`, and the Dockerfile builds with `golang:1.27-alpine`; bump all three together.
 - Prefer semantic version bumps. Breaking changes should be reviewed by maintainers before adoption.
 
 ## Adding New Dependencies
